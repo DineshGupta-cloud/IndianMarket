@@ -2,92 +2,72 @@
 
 **Multi-Agent Equity Research System for the Indian Stock Market (NSE/BSE)**
 
-Parallel specialized agents gather market data, fundamentals, technicals, news, FII/DII flows, Reddit sentiment and Screener.in insights — then synthesize a structured research report (Markdown + PDF). Includes a Streamlit dashboard and portfolio mode.
+**One app for everything** — single stock, portfolio, reports, PDF.
 
-## Features
+Parallel agents gather market data, fundamentals, technicals, news, FII/DII flows, Reddit sentiment and Screener.in insights, then synthesize a research report.
 
-| Agent | What it does |
-|-------|--------------|
-| **Market Data** | Live & historical prices, volume, returns (yfinance) |
-| **Fundamental** | Valuation, profitability, balance-sheet health |
-| **Screener.in** | Top ratios, pros/cons from public Screener pages |
-| **Technical** | RSI, MACD, SMAs, support/resistance, trend bias |
-| **News** | Recent headlines & summaries |
-| **FII / DII** | Latest institutional cash flows (NSE-sourced) |
-| **Sentiment** | Reddit (r/IndiaInvestments, r/IndianStreetBets) keyword sentiment |
-| **Macro & Risk** | India macro factors + risk checklist |
-| **Synthesis** | Combines everything → structured research report |
-
-- **Parallel execution** (LangGraph-style fan-out → synthesis)
-- **Portfolio mode** (comma-separated tickers)
-- **Streamlit interactive dashboard**
-- **PDF export**
-
-## Quick Start
+## Quick Start (only command you need)
 
 ```bash
 git clone https://github.com/DineshGupta-cloud/IndianMarket.git
 cd IndianMarket
+
+python -m venv venv
+# Windows:  venv\Scripts\activate
+# Mac/Linux: source venv/bin/activate
+
 pip install -r requirements.txt
 
-# Single stock
-python main.py RELIANCE
-python main.py TCS --pdf
-
-# Portfolio
-python main.py RELIANCE,TCS,INFY --pdf
-
-# Streamlit dashboard
-streamlit run streamlit_app.py
+streamlit run app.py
 ```
 
-Reports land in `reports/` (Markdown + PDF when requested).
+Open the browser → choose **Single Stock** or **Portfolio** → enter ticker(s) → **Run Research**.
 
-## Project Structure
+That’s it. One entry point for all features.
+
+---
+
+## What the app does
+
+| Mode | Example input | Result |
+|------|---------------|--------|
+| Single Stock | `RELIANCE` | Full multi-agent report |
+| Portfolio | `RELIANCE,TCS,INFY` | Summary table + report per stock |
+
+- Parallel agents (market, fundamental, screener, technical, news, FII/DII, sentiment, macro)
+- Markdown report + optional PDF download
+- Reports also saved under `reports/`
+
+## Optional: CLI (for scripts / automation)
+
+```bash
+python main.py RELIANCE --pdf
+python main.py RELIANCE,TCS,INFY --pdf
+```
+
+## Project structure
 
 ```
 IndianMarket/
-├── agents/
-│   ├── market_data.py
-│   ├── fundamental.py
-│   ├── screener.py          # Screener.in enrichment
-│   ├── technical.py
-│   ├── news.py
-│   ├── fii_dii.py
-│   ├── sentiment.py         # Reddit sentiment
-│   ├── macro_risk.py
-│   ├── synthesis.py
-│   └── orchestrator.py      # Parallel + portfolio mode
+├── app.py                 ← START HERE (single Streamlit app)
+├── main.py                ← optional CLI
+├── streamlit_app.py       ← legacy (same as app.py flow)
+├── agents/                ← research agents
 ├── utils/pdf_export.py
 ├── reports/
-├── main.py
-├── streamlit_app.py
 ├── requirements.txt
 └── README.md
 ```
 
-## Supported Tickers
+## Supported tickers
 
-NSE symbols (`.NS` appended automatically):
+NSE symbols (`.NS` added automatically):
 
-`RELIANCE` · `TCS` · `INFY` · `HDFCBANK` · `ICICIBANK` · `SBIN` · `BHARTIARTL` · `ITC` · `LT` · `HINDUNILVR` …
-
-## Roadmap
-
-- [x] FII/DII flows
-- [x] Parallel (LangGraph-style) agents
-- [x] Streamlit dashboard
-- [x] PDF export
-- [x] Reddit social sentiment
-- [x] Screener.in enrichment
-- [x] Multi-stock portfolio mode
-- [ ] X/Twitter sentiment (API key optional)
-- [ ] Full LangGraph + LLM reasoning layer
-- [ ] Watchlist alerts
+`RELIANCE` · `TCS` · `INFY` · `HDFCBANK` · `ICICIBANK` · `SBIN` · `BHARTIARTL` · `ITC` · `LT` · …
 
 ## Disclaimer
 
-Educational / research tool only. **Not financial advice.** Always do your own due diligence and consult a SEBI-registered advisor.
+Educational / research tool only. **Not financial advice.** Do your own due diligence and consult a SEBI-registered advisor.
 
 ---
 Built for the Indian markets 🇮🇳
