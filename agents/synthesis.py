@@ -18,8 +18,13 @@ class SynthesisAgent(BaseAgent):
         sentiment = data.get("sentiment", {})
         macro = data.get("macro_risk", {})
         fii_dii = data.get("fii_dii", {})
+        screener = data.get("screener", {})
 
-        company = market.get("company_name", self.ticker)
+        company = (
+            market.get("company_name")
+            or screener.get("company_name")
+            or self.ticker
+        )
         price = market.get("current_price", "N/A")
         change = market.get("day_change_pct", 0) or 0
 
@@ -48,6 +53,12 @@ class SynthesisAgent(BaseAgent):
         elif "DII absorbing" in flow_bias:
             reasons.append("DII absorbing FII selling (domestic support)")
 
+        sent_label = sentiment.get("sentiment_label", "")
+        if "Positive" in sent_label:
+            reasons.append(f"Reddit sentiment: {sent_label}")
+        elif "Negative" in sent_label:
+            reasons.append(f"Reddit sentiment: {sent_label}")
+
         if tech.get("trend_bias") == "Bullish" and "Strong ROE (>15%)" in flags:
             bias = "Constructive / Mildly Bullish"
         elif tech.get("trend_bias") == "Bearish" or "High trailing P/E" in flags:
@@ -66,6 +77,7 @@ class SynthesisAgent(BaseAgent):
             sentiment=sentiment,
             macro=macro,
             fii_dii=fii_dii,
+            screener=screener,
         )
 
         return {
@@ -91,6 +103,7 @@ class SynthesisAgent(BaseAgent):
         sentiment = kwargs["sentiment"]
         macro = kwargs["macro"]
         fii_dii = kwargs["fii_dii"]
+        screener = kwargs["screener"]
 
         lines = []
         lines.append(f"# Equity Research Report: {company} ({self.ticker})")
@@ -121,7 +134,6 @@ class SynthesisAgent(BaseAgent):
                 lines.append(f"  - {k}: {v:+.2f}%")
         lines.append("")
 
-        # FII / DII section
         lines.append("## 3. Institutional Flows (FII / DII)")
         if fii_dii.get("error"):
             lines.append(f"_Could not fetch flows: {fii_dii.get('error')}_")
@@ -151,7 +163,7 @@ class SynthesisAgent(BaseAgent):
         val = funda.get("valuation", {})
         prof = funda.get("profitability", {})
         health = funda.get("financial_health", {})
-        lines.append("### Valuation")
+        lines.append("### Valuation (yfinance)")
         lines.append(f"- Trailing P/E: {val.get('trailing_pe', 'N/A')}")
         lines.append(f"- Forward P/E: {val.get('forward_pe', 'N/A')}")
         lines.append(f"- Price to Book: {val.get('price_to_book', 'N/A')}")
@@ -166,6 +178,25 @@ class SynthesisAgent(BaseAgent):
         lines.append(f"- Current Ratio: {health.get('current_ratio', 'N/A')}")
         if funda.get("flags"):
             lines.append("\n**Flags:** " + ", ".join(funda["flags"]))
+
+        # Screener enrichment
+        if screener and not screener.get("error"):
+            lines.append("\n### Screener.in Enrichment")
+            top = screener.get("top_ratios", {})
+            if top:
+                for k, v in list(top.items())[:12]:
+                    lines.append(f"- {k}: {v}")
+            if screener.get("pros"):
+                lines.append("\n**Pros:**")
+                for p in screener["pros"]:
+                    lines.append(f"- {p}")
+            if screener.get("cons"):
+                lines.append("\n**Cons:**")
+                for c in screener["cons"]:
+                    lines.append(f"- {c}")
+            if screener.get("source_url"):
+                lines.append(f"\n_Source: [{screener['source_url']}]({screener['source_url']})_")
+
         if funda.get("summary"):
             lines.append(f"\n**Business Summary:**\n{funda['summary']}\n")
         lines.append("")
@@ -179,7 +210,21 @@ class SynthesisAgent(BaseAgent):
         lines.append(f"- **Price vs SMA50:** {tech.get('price_vs_sma50')}")
         lines.append("")
 
-        lines.append("## 6. Recent News")
+        lines.append("## 6. Social Sentiment (Reddit)")
+        lines.append(f"- **Label:** {sentiment.get('sentiment_label', 'N/A')}")
+        lines.append(f"- **Score:** {sentiment.get('sentiment_score', 'N/A')} "
+                     f"(pos hits: {sentiment.get('positive_hits', 0)}, "
+                     f"neg hits: {sentiment.get('negative_hits', 0)})")
+        lines.append(f"- **Posts analyzed:** {sentiment.get('post_count', 0)}")
+        top_posts = sentiment.get("top_posts", [])
+        if top_posts:
+            lines.append("\n**Top posts:**")
+            for p in top_posts[:5]:
+                lines.append(f"- [{p.get('title', '')[:80]}]({p.get('url', '')}) "
+                             f"(r/{p.get('subreddit')}, score {p.get('score')})")
+        lines.append(f"\n_{sentiment.get('note', '')}_\n")
+
+        lines.append("## 7. Recent News")
         items = news.get("items", [])
         if items:
             for i, item in enumerate(items[:6], 1):
@@ -192,8 +237,7 @@ class SynthesisAgent(BaseAgent):
         else:
             lines.append("_No recent news items retrieved._\n")
 
-        lines.append("## 7. Sentiment & Macro Context")
-        lines.append(f"*{sentiment.get('note', '')}*\n")
+        lines.append("## 8. Macro & Risk Context")
         lines.append("**Key India Macro Factors to Monitor:**")
         for f in macro.get("india_macro_factors", []):
             lines.append(f"- {f}")

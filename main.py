@@ -2,6 +2,7 @@
 """
 IndianMarket - Multi-Agent Equity Research System
 Entry point for running research on NSE/BSE stocks.
+Supports single ticker or comma-separated portfolio.
 """
 
 import argparse
@@ -17,7 +18,7 @@ def main():
     parser.add_argument(
         "ticker",
         type=str,
-        help="NSE ticker symbol (e.g. RELIANCE, TCS, HDFCBANK)"
+        help="NSE ticker(s). Single: RELIANCE  |  Portfolio: RELIANCE,TCS,INFY"
     )
     parser.add_argument(
         "--period",
@@ -39,19 +40,27 @@ def main():
 
     args = parser.parse_args()
 
-    ticker = args.ticker.upper().strip()
-    if ticker.endswith(".NS") or ticker.endswith(".BO"):
-        ticker = ticker[:-3]
+    raw = args.ticker.upper().strip()
+    # Clean .NS / .BO suffixes if user included them
+    parts = []
+    for p in raw.replace(";", ",").split(","):
+        p = p.strip()
+        if p.endswith(".NS") or p.endswith(".BO"):
+            p = p[:-3]
+        if p:
+            parts.append(p)
+
+    ticker_arg = ",".join(parts)
 
     print(f"\n🇮🇳 IndianMarket Research System")
     print(f"{'='*50}")
-    print(f"Analyzing : {ticker}")
+    print(f"Analyzing : {ticker_arg}")
     print(f"Period    : {args.period}")
     print(f"PDF export: {'Yes' if args.pdf else 'No'}")
     print(f"Time      : {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
     print(f"{'='*50}\n")
 
-    orchestrator = ResearchOrchestrator(ticker=ticker, period=args.period)
+    orchestrator = ResearchOrchestrator(ticker=ticker_arg, period=args.period)
     report_path = orchestrator.run(output_path=args.output, export_pdf=args.pdf)
 
     print(f"\n✅ Research complete!")

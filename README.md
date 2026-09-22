@@ -2,7 +2,7 @@
 
 **Multi-Agent Equity Research System for the Indian Stock Market (NSE/BSE)**
 
-A modular, agent-based research platform that analyzes Indian listed companies using specialized agents running in parallel, then synthesizes a clear research report (Markdown + optional PDF). Includes a Streamlit dashboard.
+Parallel specialized agents gather market data, fundamentals, technicals, news, FII/DII flows, Reddit sentiment and Screener.in insights — then synthesize a structured research report (Markdown + PDF). Includes a Streamlit dashboard and portfolio mode.
 
 ## Features
 
@@ -10,14 +10,16 @@ A modular, agent-based research platform that analyzes Indian listed companies u
 |-------|--------------|
 | **Market Data** | Live & historical prices, volume, returns (yfinance) |
 | **Fundamental** | Valuation, profitability, balance-sheet health |
+| **Screener.in** | Top ratios, pros/cons from public Screener pages |
 | **Technical** | RSI, MACD, SMAs, support/resistance, trend bias |
 | **News** | Recent headlines & summaries |
 | **FII / DII** | Latest institutional cash flows (NSE-sourced) |
-| **Sentiment** | Placeholder (ready for X/Reddit later) |
+| **Sentiment** | Reddit (r/IndiaInvestments, r/IndianStreetBets) keyword sentiment |
 | **Macro & Risk** | India macro factors + risk checklist |
 | **Synthesis** | Combines everything → structured research report |
 
 - **Parallel execution** (LangGraph-style fan-out → synthesis)
+- **Portfolio mode** (comma-separated tickers)
 - **Streamlit interactive dashboard**
 - **PDF export**
 
@@ -28,43 +30,45 @@ git clone https://github.com/DineshGupta-cloud/IndianMarket.git
 cd IndianMarket
 pip install -r requirements.txt
 
-# CLI
+# Single stock
 python main.py RELIANCE
 python main.py TCS --pdf
-python main.py HDFCBANK --period 2y --pdf
+
+# Portfolio
+python main.py RELIANCE,TCS,INFY --pdf
 
 # Streamlit dashboard
 streamlit run streamlit_app.py
 ```
 
-Reports are saved in the `reports/` folder (Markdown + PDF when requested).
+Reports land in `reports/` (Markdown + PDF when requested).
 
 ## Project Structure
 
 ```
 IndianMarket/
-├── agents/                 # Specialized research agents
+├── agents/
 │   ├── market_data.py
 │   ├── fundamental.py
+│   ├── screener.py          # Screener.in enrichment
 │   ├── technical.py
 │   ├── news.py
-│   ├── fii_dii.py          # NEW – institutional flows
-│   ├── sentiment.py
+│   ├── fii_dii.py
+│   ├── sentiment.py         # Reddit sentiment
 │   ├── macro_risk.py
 │   ├── synthesis.py
-│   └── orchestrator.py     # Parallel fan-out + synthesis
-├── utils/
-│   └── pdf_export.py       # Markdown → PDF
-├── reports/               # Generated reports
-├── main.py                # CLI
-├── streamlit_app.py       # Interactive dashboard
+│   └── orchestrator.py      # Parallel + portfolio mode
+├── utils/pdf_export.py
+├── reports/
+├── main.py
+├── streamlit_app.py
 ├── requirements.txt
 └── README.md
 ```
 
 ## Supported Tickers
 
-Use NSE symbols (system appends `.NS` automatically):
+NSE symbols (`.NS` appended automatically):
 
 `RELIANCE` · `TCS` · `INFY` · `HDFCBANK` · `ICICIBANK` · `SBIN` · `BHARTIARTL` · `ITC` · `LT` · `HINDUNILVR` …
 
@@ -74,14 +78,16 @@ Use NSE symbols (system appends `.NS` automatically):
 - [x] Parallel (LangGraph-style) agents
 - [x] Streamlit dashboard
 - [x] PDF export
-- [ ] Deeper Screener.in fundamentals
-- [ ] Real X/Twitter + Reddit sentiment
-- [ ] Full LangGraph / LLM reasoning layer
-- [ ] Portfolio multi-stock mode
+- [x] Reddit social sentiment
+- [x] Screener.in enrichment
+- [x] Multi-stock portfolio mode
+- [ ] X/Twitter sentiment (API key optional)
+- [ ] Full LangGraph + LLM reasoning layer
+- [ ] Watchlist alerts
 
 ## Disclaimer
 
-This is a research and educational tool only. **Not financial advice.** Always do your own due diligence and consult a SEBI-registered advisor.
+Educational / research tool only. **Not financial advice.** Always do your own due diligence and consult a SEBI-registered advisor.
 
 ---
 Built for the Indian markets 🇮🇳
