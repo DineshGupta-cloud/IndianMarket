@@ -7,7 +7,6 @@ class SynthesisAgent(BaseAgent):
     name = "SynthesisAgent"
 
     def run(self) -> Dict[str, Any]:
-        """This agent is called with the full context of other agents' results."""
         data = self.context.get("all_results", {})
         return self._build_report(data)
 
@@ -18,12 +17,12 @@ class SynthesisAgent(BaseAgent):
         news = data.get("news", {})
         sentiment = data.get("sentiment", {})
         macro = data.get("macro_risk", {})
+        fii_dii = data.get("fii_dii", {})
 
         company = market.get("company_name", self.ticker)
         price = market.get("current_price", "N/A")
-        change = market.get("day_change_pct", 0)
+        change = market.get("day_change_pct", 0) or 0
 
-        # Simple overall bias (very basic rules for v1)
         bias = "Neutral"
         reasons = []
 
@@ -43,6 +42,12 @@ class SynthesisAgent(BaseAgent):
         if "High trailing P/E" in flags:
             reasons.append("Elevated valuation (high P/E)")
 
+        flow_bias = fii_dii.get("flow_bias", "")
+        if "Both FII & DII buying" in flow_bias:
+            reasons.append("Institutional flows supportive (FII+DII buying)")
+        elif "DII absorbing" in flow_bias:
+            reasons.append("DII absorbing FII selling (domestic support)")
+
         if tech.get("trend_bias") == "Bullish" and "Strong ROE (>15%)" in flags:
             bias = "Constructive / Mildly Bullish"
         elif tech.get("trend_bias") == "Bearish" or "High trailing P/E" in flags:
@@ -60,6 +65,7 @@ class SynthesisAgent(BaseAgent):
             news=news,
             sentiment=sentiment,
             macro=macro,
+            fii_dii=fii_dii,
         )
 
         return {
@@ -69,6 +75,7 @@ class SynthesisAgent(BaseAgent):
             "reasons": reasons,
             "report_markdown": report_md,
             "generated_at": datetime.now().isoformat(),
+            "raw_results": data,
         }
 
     def _render_markdown(self, **kwargs) -> str:
@@ -83,6 +90,7 @@ class SynthesisAgent(BaseAgent):
         news = kwargs["news"]
         sentiment = kwargs["sentiment"]
         macro = kwargs["macro"]
+        fii_dii = kwargs["fii_dii"]
 
         lines = []
         lines.append(f"# Equity Research Report: {company} ({self.ticker})")
@@ -91,7 +99,6 @@ class SynthesisAgent(BaseAgent):
         lines.append(f"**Overall Bias (v1 rules):** {bias}\n")
         lines.append("---\n")
 
-        # Summary
         lines.append("## 1. Executive Summary")
         if reasons:
             lines.append("Key points:")
@@ -101,12 +108,12 @@ class SynthesisAgent(BaseAgent):
             lines.append("- Mixed signals; further detailed analysis recommended.")
         lines.append("")
 
-        # Market Data
         lines.append("## 2. Market Snapshot")
         lines.append(f"- **Sector / Industry:** {market.get('sector', 'N/A')} / {market.get('industry', 'N/A')}")
         lines.append(f"- **Market Cap:** {self._fmt_cr(market.get('market_cap'))}")
         lines.append(f"- **52-Week Range:** ₹{market.get('fifty_two_week_low', 'N/A')} – ₹{market.get('fifty_two_week_high', 'N/A')}")
-        lines.append(f"- **Volume (latest):** {market.get('volume', 'N/A'):,}" if isinstance(market.get('volume'), int) else "- **Volume:** N/A")
+        vol = market.get("volume")
+        lines.append(f"- **Volume (latest):** {vol:,}" if isinstance(vol, int) else "- **Volume:** N/A")
         rets = market.get("returns", {})
         if rets:
             lines.append("- **Performance:**")
@@ -114,8 +121,33 @@ class SynthesisAgent(BaseAgent):
                 lines.append(f"  - {k}: {v:+.2f}%")
         lines.append("")
 
-        # Fundamentals
-        lines.append("## 3. Fundamental Snapshot")
+        # FII / DII section
+        lines.append("## 3. Institutional Flows (FII / DII)")
+        if fii_dii.get("error"):
+            lines.append(f"_Could not fetch flows: {fii_dii.get('error')}_")
+        else:
+            latest = fii_dii.get("latest", {})
+            lines.append(f"**As of:** {fii_dii.get('as_of', 'N/A')}  ")
+            lines.append(f"**Flow Bias:** {fii_dii.get('flow_bias', 'N/A')}\n")
+            lines.append("| Participant | Buy (₹ Cr) | Sell (₹ Cr) | Net (₹ Cr) |")
+            lines.append("|-------------|------------|-------------|------------|")
+            lines.append(
+                f"| FII | {latest.get('fii_buy', 'N/A')} | {latest.get('fii_sell', 'N/A')} | {latest.get('fii_net', 'N/A')} |"
+            )
+            lines.append(
+                f"| DII | {latest.get('dii_buy', 'N/A')} | {latest.get('dii_sell', 'N/A')} | {latest.get('dii_net', 'N/A')} |"
+            )
+            lines.append("")
+            recent = fii_dii.get("recent_5_sessions", [])
+            if recent:
+                lines.append("**Recent 5 sessions (Net ₹ Cr):**")
+                for row in recent:
+                    lines.append(
+                        f"- {row.get('date')}: FII {row.get('fii_net')} | DII {row.get('dii_net')}"
+                    )
+            lines.append(f"\n_{fii_dii.get('note', '')}_\n")
+
+        lines.append("## 4. Fundamental Snapshot")
         val = funda.get("valuation", {})
         prof = funda.get("profitability", {})
         health = funda.get("financial_health", {})
@@ -138,8 +170,7 @@ class SynthesisAgent(BaseAgent):
             lines.append(f"\n**Business Summary:**\n{funda['summary']}\n")
         lines.append("")
 
-        # Technicals
-        lines.append("## 4. Technical Analysis")
+        lines.append("## 5. Technical Analysis")
         lines.append(f"- **Trend Bias:** {tech.get('trend_bias', 'N/A')}")
         lines.append(f"- **RSI (14):** {tech.get('rsi_14', 'N/A')} ({tech.get('rsi_signal', '')})")
         lines.append(f"- **SMA 20 / 50 / 200:** {tech.get('sma_20')} / {tech.get('sma_50')} / {tech.get('sma_200')}")
@@ -148,8 +179,7 @@ class SynthesisAgent(BaseAgent):
         lines.append(f"- **Price vs SMA50:** {tech.get('price_vs_sma50')}")
         lines.append("")
 
-        # News
-        lines.append("## 5. Recent News")
+        lines.append("## 6. Recent News")
         items = news.get("items", [])
         if items:
             for i, item in enumerate(items[:6], 1):
@@ -162,8 +192,7 @@ class SynthesisAgent(BaseAgent):
         else:
             lines.append("_No recent news items retrieved._\n")
 
-        # Sentiment & Macro
-        lines.append("## 6. Sentiment & Macro Context")
+        lines.append("## 7. Sentiment & Macro Context")
         lines.append(f"*{sentiment.get('note', '')}*\n")
         lines.append("**Key India Macro Factors to Monitor:**")
         for f in macro.get("india_macro_factors", []):
@@ -173,7 +202,6 @@ class SynthesisAgent(BaseAgent):
             lines.append(f"- {r}")
         lines.append("")
 
-        # Disclaimer
         lines.append("---")
         lines.append("## Disclaimer")
         lines.append(

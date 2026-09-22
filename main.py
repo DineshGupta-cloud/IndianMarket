@@ -5,8 +5,6 @@ Entry point for running research on NSE/BSE stocks.
 """
 
 import argparse
-import sys
-from pathlib import Path
 from datetime import datetime
 
 from agents.orchestrator import ResearchOrchestrator
@@ -33,6 +31,11 @@ def main():
         default=None,
         help="Custom output path for the report (optional)"
     )
+    parser.add_argument(
+        "--pdf",
+        action="store_true",
+        help="Also export a PDF version of the report"
+    )
 
     args = parser.parse_args()
 
@@ -42,13 +45,14 @@ def main():
 
     print(f"\n🇮🇳 IndianMarket Research System")
     print(f"{'='*50}")
-    print(f"Analyzing: {ticker}")
-    print(f"Period   : {args.period}")
-    print(f"Time     : {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
+    print(f"Analyzing : {ticker}")
+    print(f"Period    : {args.period}")
+    print(f"PDF export: {'Yes' if args.pdf else 'No'}")
+    print(f"Time      : {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
     print(f"{'='*50}\n")
 
     orchestrator = ResearchOrchestrator(ticker=ticker, period=args.period)
-    report_path = orchestrator.run(output_path=args.output)
+    report_path = orchestrator.run(output_path=args.output, export_pdf=args.pdf)
 
     print(f"\n✅ Research complete!")
     print(f"📄 Report saved to: {report_path}")
