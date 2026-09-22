@@ -1,0 +1,10 @@
+yfinance>=0.2.40
+pandas>=2.0.0
+numpy>=1.24.0
+ta-lib-python>=0.1.0; platform_system!="Windows"
+# Alternative pure-python technical indicators if TA-Lib not available
+pandas-ta>=0.3.14b
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+python-dateutil>=2.8.0
+tqdm>=4.66.0
