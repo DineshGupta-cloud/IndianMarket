@@ -4,6 +4,7 @@ IndianMarket – Single App for Everything
 One Streamlit dashboard for:
   - Single stock research
   - Portfolio (multi-ticker) research
+  - Optional LLM synthesis (API key)
   - Markdown + PDF reports
 
 Run:
@@ -11,10 +12,10 @@ Run:
 """
 
 import streamlit as st
-from pathlib import Path
 import traceback
 
 from agents.orchestrator import ResearchOrchestrator
+from utils.llm_client import is_llm_available, resolve_llm_config
 
 st.set_page_config(
     page_title="IndianMarket",
@@ -23,9 +24,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("🇮🇳 IndianMarket")
     st.caption("Multi-agent research for NSE/BSE")
@@ -52,6 +50,41 @@ with st.sidebar:
     period = st.selectbox("History period", ["6mo", "1y", "2y", "5y"], index=1)
     export_pdf = st.checkbox("Export PDF", value=True)
 
+    st.markdown("---")
+    st.markdown("**LLM Synthesis (optional)**")
+    use_llm = st.checkbox("Enable LLM thesis", value=True)
+    llm_key = st.text_input(
+        "API key",
+        type="password",
+        help="Groq / OpenAI / any OpenAI-compatible key. Or set GROQ_API_KEY / OPENAI_API_KEY / LLM_API_KEY env var.",
+        placeholder="Leave blank to use env var or rules only",
+    )
+    llm_provider = st.selectbox(
+        "Provider preset",
+        ["Groq (free tier)", "OpenAI", "Custom"],
+        index=0,
+    )
+    if llm_provider == "Groq (free tier)":
+        default_base = "https://api.groq.com/openai/v1"
+        default_model = "llama-3.3-70b-versatile"
+    elif llm_provider == "OpenAI":
+        default_base = "https://api.openai.com/v1"
+        default_model = "gpt-4o-mini"
+    else:
+        default_base = "https://api.groq.com/openai/v1"
+        default_model = "llama-3.3-70b-versatile"
+
+    llm_base = st.text_input("Base URL", value=default_base)
+    llm_model = st.text_input("Model", value=default_model)
+
+    env_ready = is_llm_available(api_key=llm_key or None)
+    if use_llm and env_ready:
+        st.success("LLM key detected — thesis will use LLM")
+    elif use_llm:
+        st.info("No API key — will use rule-based synthesis")
+    else:
+        st.info("LLM disabled — rule-based only")
+
     run_btn = st.button("🚀 Run Research", type="primary", use_container_width=True)
 
     st.markdown("---")
@@ -65,27 +98,29 @@ with st.sidebar:
     - FII / DII
     - Reddit Sentiment
     - Macro & Risk
-    - Synthesis
+    - Synthesis (+ optional LLM)
     """)
     st.markdown("---")
     st.caption("Educational use only • Not investment advice")
 
-# ---------------------------------------------------------------------------
-# Main area
-# ---------------------------------------------------------------------------
 st.title("IndianMarket Research")
 st.caption("One app for single-stock and portfolio analysis")
 
 if not run_btn:
-    st.info("Choose **Single Stock** or **Portfolio** in the sidebar, enter ticker(s), then click **Run Research**.")
+    st.info("Choose mode, enter ticker(s), optionally add an LLM API key, then click **Run Research**.")
     st.markdown("""
+    ### LLM setup (optional)
+    1. Get a free key from [Groq Console](https://console.groq.com/) (recommended)
+    2. Paste it in the sidebar **or** set env var `GROQ_API_KEY`
+    3. Enable **LLM thesis** and run
+
+    Without a key, reports still work using rule-based synthesis.
+
     ### Quick examples
     | Mode | Input |
     |------|--------|
     | Single | `RELIANCE` |
-    | Single | `TCS` |
     | Portfolio | `RELIANCE,TCS,INFY` |
-    | Portfolio | `HDFCBANK,ICICIBANK,SBIN` |
     """)
     st.stop()
 
@@ -93,7 +128,6 @@ if not ticker_input:
     st.warning("Please enter at least one ticker.")
     st.stop()
 
-# Normalize tickers
 parts = []
 for p in ticker_input.replace(";", ",").split(","):
     p = p.strip()
@@ -103,24 +137,31 @@ for p in ticker_input.replace(";", ",").split(","):
         parts.append(p)
 ticker_arg = ",".join(parts)
 
-with st.spinner(f"Running multi-agent research on **{ticker_arg}** (parallel)..."):
+llm_config = {
+    "enabled": use_llm,
+    "api_key": llm_key or None,
+    "base_url": llm_base or None,
+    "model": llm_model or None,
+}
+
+with st.spinner(f"Running multi-agent research on **{ticker_arg}**..."):
     try:
-        orch = ResearchOrchestrator(ticker=ticker_arg, period=period)
+        orch = ResearchOrchestrator(
+            ticker=ticker_arg, period=period, llm_config=llm_config
+        )
         report_path = orch.run(export_pdf=export_pdf)
         synthesis = orch.results.get("synthesis", {})
 
-        # ---- Portfolio view ----
         if synthesis.get("portfolio_summaries"):
             st.success(f"Portfolio report ready for: {ticker_arg}")
             st.subheader("Portfolio Summary")
             st.dataframe(synthesis["portfolio_summaries"], use_container_width=True)
-
-        # ---- Single stock metrics ----
         else:
             market = orch.results.get("market_data", {})
             fii = orch.results.get("fii_dii", {})
             tech = orch.results.get("technical", {})
             sentiment = orch.results.get("sentiment", {})
+            llm_out = synthesis.get("llm") or {}
 
             st.success(f"Report ready for **{synthesis.get('company', ticker_arg)}**")
 
@@ -134,6 +175,13 @@ with st.spinner(f"Running multi-agent research on **{ticker_arg}** (parallel)...
             c3.metric("Bias", synthesis.get("bias", "N/A"))
             c4.metric("RSI (14)", tech.get("rsi_14", "N/A"), tech.get("rsi_signal", ""))
 
+            if llm_out and not llm_out.get("error") and llm_out.get("thesis"):
+                st.subheader("LLM Thesis")
+                st.write(llm_out["thesis"])
+                m1, m2 = st.columns(2)
+                m1.caption(f"Model: {llm_out.get('model', 'N/A')}")
+                m2.caption(f"Confidence: {llm_out.get('confidence', 'N/A')}/10")
+
             st.markdown("---")
 
             if not fii.get("error"):
@@ -143,7 +191,6 @@ with st.spinner(f"Running multi-agent research on **{ticker_arg}** (parallel)...
                 f1.metric("FII Net (₹ Cr)", latest.get("fii_net", "N/A"))
                 f2.metric("DII Net (₹ Cr)", latest.get("dii_net", "N/A"))
                 f3.write(f"**{fii.get('flow_bias', '')}**")
-                st.caption(f"As of {fii.get('as_of', 'N/A')}")
 
             if sentiment.get("post_count", 0) > 0:
                 st.subheader("Reddit Sentiment")
@@ -151,11 +198,9 @@ with st.spinner(f"Running multi-agent research on **{ticker_arg}** (parallel)...
                 s1.metric("Label", sentiment.get("sentiment_label", "N/A"))
                 s2.metric("Posts analyzed", sentiment.get("post_count", 0))
 
-        # ---- Full report ----
         st.subheader("Full Research Report")
         st.markdown(synthesis.get("report_markdown", "_No report generated_"))
 
-        # ---- Downloads ----
         st.markdown("---")
         d1, d2 = st.columns(2)
         with d1:

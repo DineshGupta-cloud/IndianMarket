@@ -2,11 +2,9 @@
 
 **Multi-Agent Equity Research System for the Indian Stock Market (NSE/BSE)**
 
-**One app for everything** — single stock, portfolio, reports, PDF.
+**One app for everything** — single stock, portfolio, optional LLM thesis, PDF reports.
 
-Parallel agents gather market data, fundamentals, technicals, news, FII/DII flows, Reddit sentiment and Screener.in insights, then synthesize a research report.
-
-## Quick Start (only command you need)
+## Quick Start
 
 ```bash
 git clone https://github.com/DineshGupta-cloud/IndianMarket.git
@@ -17,57 +15,56 @@ python -m venv venv
 # Mac/Linux: source venv/bin/activate
 
 pip install -r requirements.txt
-
 streamlit run app.py
 ```
 
-Open the browser → choose **Single Stock** or **Portfolio** → enter ticker(s) → **Run Research**.
+## Optional: LLM-powered synthesis
 
-That’s it. One entry point for all features.
+Without a key, reports use **rule-based** bias (always works).
 
----
+With a key, the Synthesis agent adds an **LLM investment thesis** (bull/bear cases, risks, confidence).
 
-## What the app does
+### Recommended: free Groq key
+1. Create a key at [console.groq.com](https://console.groq.com/)
+2. Either:
+   - Paste it in the Streamlit sidebar, **or**
+   - Set env var and restart:
 
-| Mode | Example input | Result |
-|------|---------------|--------|
-| Single Stock | `RELIANCE` | Full multi-agent report |
-| Portfolio | `RELIANCE,TCS,INFY` | Summary table + report per stock |
+```bash
+# Windows (PowerShell)
+$env:GROQ_API_KEY="your_key_here"
 
-- Parallel agents (market, fundamental, screener, technical, news, FII/DII, sentiment, macro)
-- Markdown report + optional PDF download
-- Reports also saved under `reports/`
+# Mac/Linux
+export GROQ_API_KEY="your_key_here"
+```
 
-## Optional: CLI (for scripts / automation)
+Also supported: `OPENAI_API_KEY`, `LLM_API_KEY`, custom OpenAI-compatible `LLM_BASE_URL` + `LLM_MODEL`.
+
+### CLI examples
 
 ```bash
 python main.py RELIANCE --pdf
-python main.py RELIANCE,TCS,INFY --pdf
+python main.py RELIANCE --llm-key YOUR_KEY --pdf
+python main.py RELIANCE,TCS --no-llm
 ```
 
-## Project structure
+## Features
 
-```
-IndianMarket/
-├── app.py                 ← START HERE (single Streamlit app)
-├── main.py                ← optional CLI
-├── streamlit_app.py       ← legacy (same as app.py flow)
-├── agents/                ← research agents
-├── utils/pdf_export.py
-├── reports/
-├── requirements.txt
-└── README.md
-```
-
-## Supported tickers
-
-NSE symbols (`.NS` added automatically):
-
-`RELIANCE` · `TCS` · `INFY` · `HDFCBANK` · `ICICIBANK` · `SBIN` · `BHARTIARTL` · `ITC` · `LT` · …
+| Agent | Role |
+|-------|------|
+| Market Data | Prices, volume, returns |
+| Fundamental | Valuation & quality (yfinance) |
+| Screener.in | Top ratios, pros/cons |
+| Technical | RSI, MACD, SMAs, S/R |
+| News | Recent headlines |
+| FII/DII | Institutional cash flows |
+| Sentiment | Reddit keyword sentiment |
+| Macro & Risk | India checklist |
+| Synthesis | Rules + **optional LLM thesis** |
 
 ## Disclaimer
 
-Educational / research tool only. **Not financial advice.** Do your own due diligence and consult a SEBI-registered advisor.
+Educational tool only. **Not financial advice.** Consult a SEBI-registered advisor.
 
 ---
 Built for the Indian markets 🇮🇳

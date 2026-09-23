@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from datetime import datetime
 from .base import BaseAgent
 
@@ -8,9 +8,10 @@ class SynthesisAgent(BaseAgent):
 
     def run(self) -> Dict[str, Any]:
         data = self.context.get("all_results", {})
-        return self._build_report(data)
+        llm_cfg = self.context.get("llm") or {}
+        return self._build_report(data, llm_cfg)
 
-    def _build_report(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_report(self, data: Dict[str, Any], llm_cfg: Dict[str, Any]) -> Dict[str, Any]:
         market = data.get("market_data", {})
         funda = data.get("fundamental", {})
         tech = data.get("technical", {})
@@ -28,6 +29,7 @@ class SynthesisAgent(BaseAgent):
         price = market.get("current_price", "N/A")
         change = market.get("day_change_pct", 0) or 0
 
+        # --- Rule-based bias (always computed as baseline) ---
         bias = "Neutral"
         reasons = []
 
@@ -64,6 +66,33 @@ class SynthesisAgent(BaseAgent):
         elif tech.get("trend_bias") == "Bearish" or "High trailing P/E" in flags:
             bias = "Cautious"
 
+        # --- Optional LLM thesis ---
+        llm_result = None
+        use_llm = llm_cfg.get("enabled", True)
+        if use_llm:
+            try:
+                from utils.llm_client import generate_llm_thesis, is_llm_available
+
+                if is_llm_available(api_key=llm_cfg.get("api_key")):
+                    self.log("Calling LLM for synthesis thesis...")
+                    llm_result = generate_llm_thesis(
+                        ticker=self.ticker,
+                        company=company,
+                        context=data,
+                        api_key=llm_cfg.get("api_key"),
+                        base_url=llm_cfg.get("base_url"),
+                        model=llm_cfg.get("model"),
+                    )
+                    if llm_result and not llm_result.get("error") and llm_result.get("bias"):
+                        bias = llm_result["bias"]
+                        if llm_result.get("thesis"):
+                            reasons = [llm_result["thesis"]] + reasons[:4]
+                    elif llm_result and llm_result.get("error"):
+                        self.log(f"LLM error (using rules): {llm_result['error']}")
+            except Exception as e:
+                self.log(f"LLM unavailable (using rules): {e}")
+                llm_result = {"error": str(e)}
+
         report_md = self._render_markdown(
             company=company,
             price=price,
@@ -78,6 +107,7 @@ class SynthesisAgent(BaseAgent):
             macro=macro,
             fii_dii=fii_dii,
             screener=screener,
+            llm_result=llm_result,
         )
 
         return {
@@ -85,6 +115,7 @@ class SynthesisAgent(BaseAgent):
             "company": company,
             "bias": bias,
             "reasons": reasons,
+            "llm": llm_result,
             "report_markdown": report_md,
             "generated_at": datetime.now().isoformat(),
             "raw_results": data,
@@ -104,24 +135,62 @@ class SynthesisAgent(BaseAgent):
         macro = kwargs["macro"]
         fii_dii = kwargs["fii_dii"]
         screener = kwargs["screener"]
+        llm_result = kwargs.get("llm_result")
 
         lines = []
         lines.append(f"# Equity Research Report: {company} ({self.ticker})")
         lines.append(f"\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M IST')}  ")
         lines.append(f"**Current Price:** ₹{price} ({change:+.2f}%)  ")
-        lines.append(f"**Overall Bias (v1 rules):** {bias}\n")
+        source = "LLM + rules" if (llm_result and not llm_result.get("error") and llm_result.get("thesis")) else "rules"
+        lines.append(f"**Overall Bias ({source}):** {bias}\n")
         lines.append("---\n")
 
-        lines.append("## 1. Executive Summary")
+        # LLM thesis block
+        if llm_result and not llm_result.get("error") and llm_result.get("thesis"):
+            lines.append("## 1. LLM Investment Thesis")
+            lines.append(llm_result["thesis"])
+            lines.append("")
+            if llm_result.get("bull_case"):
+                lines.append("**Bull case**")
+                for b in llm_result["bull_case"]:
+                    lines.append(f"- {b}")
+                lines.append("")
+            if llm_result.get("bear_case"):
+                lines.append("**Bear case**")
+                for b in llm_result["bear_case"]:
+                    lines.append(f"- {b}")
+                lines.append("")
+            if llm_result.get("key_risks"):
+                lines.append("**Key risks**")
+                for r in llm_result["key_risks"]:
+                    lines.append(f"- {r}")
+                lines.append("")
+            if llm_result.get("what_to_watch"):
+                lines.append("**What to watch**")
+                for w in llm_result["what_to_watch"]:
+                    lines.append(f"- {w}")
+                lines.append("")
+            conf = llm_result.get("confidence")
+            model = llm_result.get("model", "")
+            lines.append(f"_Confidence: {conf}/10 · Model: {model}_\n")
+            lines.append("## 2. Rule-based Highlights")
+        else:
+            lines.append("## 1. Executive Summary")
+            if llm_result and llm_result.get("error"):
+                lines.append(f"_LLM synthesis skipped: {llm_result['error']}_\n")
+
         if reasons:
             lines.append("Key points:")
             for r in reasons:
+                # Avoid duplicating full thesis paragraph as a bullet if already shown
+                if llm_result and r == llm_result.get("thesis"):
+                    continue
                 lines.append(f"- {r}")
         else:
             lines.append("- Mixed signals; further detailed analysis recommended.")
         lines.append("")
 
-        lines.append("## 2. Market Snapshot")
+        lines.append("## Market Snapshot")
         lines.append(f"- **Sector / Industry:** {market.get('sector', 'N/A')} / {market.get('industry', 'N/A')}")
         lines.append(f"- **Market Cap:** {self._fmt_cr(market.get('market_cap'))}")
         lines.append(f"- **52-Week Range:** ₹{market.get('fifty_two_week_low', 'N/A')} – ₹{market.get('fifty_two_week_high', 'N/A')}")
@@ -134,7 +203,7 @@ class SynthesisAgent(BaseAgent):
                 lines.append(f"  - {k}: {v:+.2f}%")
         lines.append("")
 
-        lines.append("## 3. Institutional Flows (FII / DII)")
+        lines.append("## Institutional Flows (FII / DII)")
         if fii_dii.get("error"):
             lines.append(f"_Could not fetch flows: {fii_dii.get('error')}_")
         else:
@@ -159,7 +228,7 @@ class SynthesisAgent(BaseAgent):
                     )
             lines.append(f"\n_{fii_dii.get('note', '')}_\n")
 
-        lines.append("## 4. Fundamental Snapshot")
+        lines.append("## Fundamental Snapshot")
         val = funda.get("valuation", {})
         prof = funda.get("profitability", {})
         health = funda.get("financial_health", {})
@@ -179,7 +248,6 @@ class SynthesisAgent(BaseAgent):
         if funda.get("flags"):
             lines.append("\n**Flags:** " + ", ".join(funda["flags"]))
 
-        # Screener enrichment
         if screener and not screener.get("error"):
             lines.append("\n### Screener.in Enrichment")
             top = screener.get("top_ratios", {})
@@ -201,7 +269,7 @@ class SynthesisAgent(BaseAgent):
             lines.append(f"\n**Business Summary:**\n{funda['summary']}\n")
         lines.append("")
 
-        lines.append("## 5. Technical Analysis")
+        lines.append("## Technical Analysis")
         lines.append(f"- **Trend Bias:** {tech.get('trend_bias', 'N/A')}")
         lines.append(f"- **RSI (14):** {tech.get('rsi_14', 'N/A')} ({tech.get('rsi_signal', '')})")
         lines.append(f"- **SMA 20 / 50 / 200:** {tech.get('sma_20')} / {tech.get('sma_50')} / {tech.get('sma_200')}")
@@ -210,7 +278,7 @@ class SynthesisAgent(BaseAgent):
         lines.append(f"- **Price vs SMA50:** {tech.get('price_vs_sma50')}")
         lines.append("")
 
-        lines.append("## 6. Social Sentiment (Reddit)")
+        lines.append("## Social Sentiment (Reddit)")
         lines.append(f"- **Label:** {sentiment.get('sentiment_label', 'N/A')}")
         lines.append(f"- **Score:** {sentiment.get('sentiment_score', 'N/A')} "
                      f"(pos hits: {sentiment.get('positive_hits', 0)}, "
@@ -224,7 +292,7 @@ class SynthesisAgent(BaseAgent):
                              f"(r/{p.get('subreddit')}, score {p.get('score')})")
         lines.append(f"\n_{sentiment.get('note', '')}_\n")
 
-        lines.append("## 7. Recent News")
+        lines.append("## Recent News")
         items = news.get("items", [])
         if items:
             for i, item in enumerate(items[:6], 1):
@@ -237,7 +305,7 @@ class SynthesisAgent(BaseAgent):
         else:
             lines.append("_No recent news items retrieved._\n")
 
-        lines.append("## 8. Macro & Risk Context")
+        lines.append("## Macro & Risk Context")
         lines.append("**Key India Macro Factors to Monitor:**")
         for f in macro.get("india_macro_factors", []):
             lines.append(f"- {f}")

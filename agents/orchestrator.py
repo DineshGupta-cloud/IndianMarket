@@ -19,18 +19,24 @@ class ResearchOrchestrator:
     Coordinates all agents in a LangGraph-style parallel fan-out,
     then synthesizes the final research report.
     Supports single ticker or multi-ticker portfolio mode.
+    Optional LLM synthesis via llm_config.
     """
 
-    def __init__(self, ticker: Union[str, List[str]], period: str = "1y"):
+    def __init__(
+        self,
+        ticker: Union[str, List[str]],
+        period: str = "1y",
+        llm_config: Optional[Dict[str, Any]] = None,
+    ):
         if isinstance(ticker, str):
-            # Allow comma-separated string
             parts = [t.strip().upper() for t in ticker.replace(";", ",").split(",") if t.strip()]
             self.tickers = parts
         else:
             self.tickers = [t.upper().strip() for t in ticker]
 
-        self.ticker = self.tickers[0]  # primary for single-stock compatibility
+        self.ticker = self.tickers[0]
         self.period = period
+        self.llm_config = llm_config or {"enabled": True}
         self.results: Dict[str, Any] = {}
         self.portfolio_results: Dict[str, Dict[str, Any]] = {}
 
@@ -48,7 +54,9 @@ class ResearchOrchestrator:
             raise RuntimeError("Market data unavailable")
 
         print("\n📝 Synthesizing research report...")
-        synth_agent = SynthesisAgent(ticker, all_results=self.results)
+        synth_agent = SynthesisAgent(
+            ticker, all_results=self.results, llm=self.llm_config
+        )
         synthesis = synth_agent.run()
         self.results["synthesis"] = synthesis
 
@@ -62,7 +70,9 @@ class ResearchOrchestrator:
             print(f"\n--- Analyzing {t} ---")
             try:
                 res = self._execute_agents(t)
-                synth = SynthesisAgent(t, all_results=res).run()
+                synth = SynthesisAgent(
+                    t, all_results=res, llm=self.llm_config
+                ).run()
                 res["synthesis"] = synth
                 self.portfolio_results[t] = res
                 summaries.append({
@@ -77,7 +87,6 @@ class ResearchOrchestrator:
                 print(f"  ⚠️  {t} failed: {e}")
                 summaries.append({"ticker": t, "error": str(e)})
 
-        # Combined portfolio markdown
         lines = [
             f"# Portfolio Research Report",
             f"\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M IST')}  ",
@@ -171,7 +180,7 @@ class ResearchOrchestrator:
         print(f"\n📊 Quick Summary for {synthesis.get('company', label)}")
         print(f"   Bias     : {synthesis.get('bias')}")
         if synthesis.get("reasons"):
-            for r in synthesis["reasons"]:
-                print(f"   • {r}")
+            for r in synthesis["reasons"][:5]:
+                print(f"   • {str(r)[:120]}")
 
         return report_path
