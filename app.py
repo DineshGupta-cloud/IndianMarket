@@ -1,9 +1,6 @@
 """
-IndianMarket – Single App for Everything
-  - Research (single / ad-hoc portfolio)
-  - Saved portfolios (SQLite)
-  - Optional LLM synthesis
-  - PDF / Markdown reports
+IndianMarket – Single App
+  Research | Portfolios | Alerts | Stock list
 
 Run:  streamlit run app.py
 """
@@ -13,6 +10,7 @@ import traceback
 
 from agents.orchestrator import ResearchOrchestrator
 from utils.llm_client import is_llm_available
+from utils.alerts import evaluate_alerts
 from utils.portfolio_store import (
     SUGGESTED_STOCKS,
     add_holding,
@@ -33,15 +31,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Init DB + example portfolios on first run
 init_db(seed_examples=True)
 
-# ---------------------------------------------------------------------------
-# Sidebar: LLM + research settings
-# ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("🇮🇳 IndianMarket")
-    st.caption("Research + saved portfolios")
+    st.caption("Research · Portfolios · Alerts")
 
     period = st.selectbox("History period", ["6mo", "1y", "2y", "5y"], index=1)
     export_pdf = st.checkbox("Export PDF", value=True)
@@ -75,7 +69,6 @@ llm_config = {
 
 
 def run_research(ticker_arg: str):
-    """Shared research runner + display."""
     with st.spinner(f"Running multi-agent research on **{ticker_arg}**..."):
         try:
             orch = ResearchOrchestrator(
@@ -153,14 +146,11 @@ def run_research(ticker_arg: str):
             st.code(traceback.format_exc())
 
 
-# ---------------------------------------------------------------------------
-# Tabs
-# ---------------------------------------------------------------------------
-tab_research, tab_portfolios, tab_stocks = st.tabs(
-    ["📊 Research", "💼 My Portfolios", "📋 Stock list"]
+tab_research, tab_portfolios, tab_alerts, tab_stocks = st.tabs(
+    ["📊 Research", "💼 My Portfolios", "🔔 Alerts", "📋 Stock list"]
 )
 
-# ===== Research tab =====
+# ===== Research =====
 with tab_research:
     st.header("Quick research")
     mode = st.radio("Mode", ["Single Stock", "Ad-hoc list"], horizontal=True)
@@ -182,14 +172,13 @@ with tab_research:
         else:
             run_research(",".join(parts))
 
-# ===== Portfolios tab =====
+# ===== Portfolios =====
 with tab_portfolios:
     st.header("Saved portfolios (SQLite)")
-    st.caption("Data file: `data/portfolios.db` — example portfolios are loaded on first run.")
+    st.caption("File: `data/portfolios.db` — examples load on first run.")
 
     portfolios = list_portfolios()
 
-    # Create new
     with st.expander("➕ Create portfolio", expanded=not portfolios):
         new_name = st.text_input("Name", placeholder="e.g. My SIP")
         new_notes = st.text_input("Notes (optional)")
@@ -202,10 +191,10 @@ with tab_portfolios:
                 st.error(str(e))
 
     if not portfolios:
-        st.info("No portfolios yet. Create one above (examples seed automatically on first run).")
+        st.info("No portfolios yet.")
     else:
         names = {f"{p['name']} (id {p['id']})": p for p in portfolios}
-        choice = st.selectbox("Select portfolio", list(names.keys()))
+        choice = st.selectbox("Select portfolio", list(names.keys()), key="pf_select")
         selected = names[choice]
         pid = selected["id"]
 
@@ -226,9 +215,8 @@ with tab_portfolios:
                 use_container_width=True,
             )
         else:
-            st.warning("No stocks in this portfolio yet.")
+            st.warning("No stocks yet.")
 
-        # Add stock
         st.subheader("Add stock")
         c1, c2, c3, c4 = st.columns([2, 1, 1, 2])
         with c1:
@@ -237,15 +225,16 @@ with tab_portfolios:
                 "Pick from list",
                 [""] + suggested,
                 format_func=lambda x: x or "— or type below —",
+                key="add_pick",
             )
-            custom_ticker = st.text_input("Or type ticker", placeholder="e.g. RELIANCE")
+            custom_ticker = st.text_input("Or type ticker", placeholder="RELIANCE", key="add_custom")
             ticker_to_add = (custom_ticker or add_ticker or "").upper().strip()
         with c2:
-            qty = st.number_input("Qty (optional)", min_value=0.0, value=0.0, step=1.0)
+            qty = st.number_input("Qty", min_value=0.0, value=0.0, step=1.0)
         with c3:
-            avg_px = st.number_input("Avg price (optional)", min_value=0.0, value=0.0, step=1.0)
+            avg_px = st.number_input("Avg price", min_value=0.0, value=0.0, step=1.0)
         with c4:
-            h_notes = st.text_input("Note", placeholder="optional")
+            h_notes = st.text_input("Note", placeholder="optional", key="hnote")
 
         if st.button("Add to portfolio"):
             if not ticker_to_add:
@@ -264,10 +253,9 @@ with tab_portfolios:
                 except Exception as e:
                     st.error(str(e))
 
-        # Remove stock
         if holdings:
             st.subheader("Remove stock")
-            rm = st.selectbox("Ticker to remove", [h["ticker"] for h in holdings])
+            rm = st.selectbox("Ticker to remove", [h["ticker"] for h in holdings], key="rm")
             if st.button("Remove", type="secondary"):
                 remove_holding(pid, rm)
                 st.success(f"Removed **{rm}**")
@@ -280,7 +268,7 @@ with tab_portfolios:
                 run_research(tickers_csv(pid))
         with col_b:
             st.download_button(
-                "📥 Export all JSON",
+                "📥 Export JSON",
                 data=export_json(),
                 file_name="portfolios_backup.json",
                 mime="application/json",
@@ -291,11 +279,112 @@ with tab_portfolios:
                 st.success("Deleted")
                 st.rerun()
 
-# ===== Stock list tab =====
-with tab_stocks:
-    st.header("Suggested NSE stocks to add")
-    st.caption("Use these tickers in portfolios or quick research.")
-    st.dataframe(SUGGESTED_STOCKS, use_container_width=True)
-    st.markdown(
-        "You can also type **any** NSE symbol (e.g. `TATAPOWER`, `DMART`) when adding holdings."
+# ===== Alerts =====
+with tab_alerts:
+    st.header("Watchlist alerts")
+    st.caption(
+        "Checks price, day % move, and RSI on a portfolio or a custom list. "
+        "Run anytime (or schedule later with cron)."
     )
+
+    portfolios = list_portfolios()
+    source = st.radio(
+        "Scan source",
+        ["Saved portfolio", "Custom tickers"],
+        horizontal=True,
+    )
+
+    tickers: list[str] = []
+    if source == "Saved portfolio":
+        if not portfolios:
+            st.warning("Create a portfolio first.")
+        else:
+            label_map = {p["name"]: p["id"] for p in portfolios}
+            pname = st.selectbox("Portfolio", list(label_map.keys()), key="alert_pf")
+            tickers = [h["ticker"] for h in get_holdings(label_map[pname])]
+            st.write("Tickers:", ", ".join(tickers) if tickers else "_(empty)_")
+    else:
+        custom = st.text_input(
+            "Tickers",
+            value="RELIANCE,TCS,HDFCBANK,INFY",
+            key="alert_custom",
+        ).upper()
+        tickers = [p.strip() for p in custom.replace(";", ",").split(",") if p.strip()]
+
+    st.subheader("Rules")
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        use_above = st.checkbox("Price above")
+        price_above = st.number_input("Above ₹", min_value=0.0, value=0.0, step=10.0) if use_above else None
+        if not use_above:
+            price_above = None
+    with r2:
+        use_below = st.checkbox("Price below")
+        price_below = st.number_input("Below ₹", min_value=0.0, value=0.0, step=10.0) if use_below else None
+        if not use_below:
+            price_below = None
+    with r3:
+        use_day = st.checkbox("Day move ±%", value=True)
+        day_pct = st.number_input("Threshold %", min_value=0.5, value=2.0, step=0.5) if use_day else None
+        if not use_day:
+            day_pct = None
+
+    c_rsi1, c_rsi2, c_rsi3 = st.columns(3)
+    with c_rsi1:
+        check_rsi = st.checkbox("RSI alerts", value=True)
+    with c_rsi2:
+        rsi_ob = st.number_input("Overbought ≥", min_value=50.0, value=70.0, step=1.0)
+    with c_rsi3:
+        rsi_os = st.number_input("Oversold ≤", min_value=1.0, value=30.0, step=1.0)
+
+    if st.button("🔍 Run alert scan", type="primary"):
+        if not tickers:
+            st.warning("No tickers to scan")
+        else:
+            with st.spinner("Fetching prices & RSI..."):
+                rows = evaluate_alerts(
+                    tickers,
+                    price_above=price_above if price_above and price_above > 0 else None,
+                    price_below=price_below if price_below and price_below > 0 else None,
+                    day_change_abs_pct=day_pct,
+                    rsi_overbought=rsi_ob,
+                    rsi_oversold=rsi_os,
+                    check_rsi=check_rsi,
+                )
+
+            triggered = [r for r in rows if r.get("alerts")]
+            quiet = [r for r in rows if not r.get("alerts")]
+
+            st.subheader(f"Triggered ({len(triggered)})")
+            if not triggered:
+                st.success("No alerts fired with current rules.")
+            else:
+                for r in triggered:
+                    with st.container():
+                        st.markdown(
+                            f"**{r['ticker']}** · ₹{r.get('price', 'N/A')} "
+                            f"({r.get('day_change_pct', 0):+.2f}%) · RSI {r.get('rsi_14', 'N/A')}"
+                        )
+                        for a in r["alerts"]:
+                            st.warning(a)
+
+            with st.expander(f"All snapshots ({len(rows)})"):
+                st.dataframe(
+                    [
+                        {
+                            "Ticker": r.get("ticker"),
+                            "Price": r.get("price"),
+                            "Day %": r.get("day_change_pct"),
+                            "RSI": r.get("rsi_14"),
+                            "Alerts": "; ".join(r.get("alerts") or []) or "—",
+                        }
+                        for r in rows
+                    ],
+                    use_container_width=True,
+                )
+
+# ===== Stock list =====
+with tab_stocks:
+    st.header("Suggested NSE stocks")
+    st.dataframe(SUGGESTED_STOCKS, use_container_width=True)
+    st.markdown("Any NSE symbol works when adding holdings (e.g. `TATAPOWER`, `DMART`).")
