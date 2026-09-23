@@ -2,14 +2,11 @@
 Optional LLM client for synthesis.
 Works with any OpenAI-compatible API (Groq, OpenAI, Together, local, etc.).
 
+Easiest setup: put this in a local .env file (never commit it):
+
+  GROQ_API_KEY=gsk_your_key_here
+
 If no API key is set, returns None and the system falls back to rule-based synthesis.
-
-Env vars (any one of these for the key):
-  LLM_API_KEY, GROQ_API_KEY, OPENAI_API_KEY
-
-Optional:
-  LLM_BASE_URL  (default: https://api.groq.com/openai/v1)
-  LLM_MODEL     (default: llama-3.3-70b-versatile)
 """
 
 from __future__ import annotations
@@ -20,12 +17,17 @@ from typing import Any, Dict, Optional
 
 import requests
 
+from utils.env_loader import load_env
+
+load_env()
+
 
 def resolve_llm_config(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
 ) -> Dict[str, Optional[str]]:
+    load_env()
     key = (
         api_key
         or os.getenv("LLM_API_KEY")
@@ -58,16 +60,10 @@ def generate_llm_thesis(
     model: Optional[str] = None,
     timeout: int = 60,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Ask the LLM for an investment-style thesis from structured agent outputs.
-    Returns dict with keys: thesis, bias, key_risks, confidence, raw_text
-    or None if LLM is unavailable / fails.
-    """
     cfg = resolve_llm_config(api_key=api_key, base_url=base_url, model=model)
     if not cfg["api_key"]:
         return None
 
-    # Compact context for the prompt (avoid huge payloads)
     slim = {
         "ticker": ticker,
         "company": company,
@@ -124,7 +120,6 @@ Return ONLY valid JSON, no markdown fences."""
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"].strip()
 
-        # Strip optional markdown fences
         if content.startswith("```"):
             content = content.strip("`")
             if content.startswith("json"):
@@ -152,7 +147,6 @@ def _slim(obj: Any, max_depth: int = 3) -> Any:
     if max_depth <= 0:
         return str(obj)[:200]
     if isinstance(obj, dict):
-        # Drop heavy / less useful keys
         skip = {"history_tail", "raw_results", "report_markdown", "summary"}
         return {
             k: _slim(v, max_depth - 1)

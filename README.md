@@ -1,16 +1,14 @@
 # IndianMarket 🇮🇳
 
-**Multi-Agent Equity Research System for the Indian Stock Market (NSE/BSE)**
+**Multi-Agent Equity Research for NSE/BSE** — one app for single stock, portfolio, optional LLM thesis, PDF.
 
-**One app for everything** — single stock, portfolio, optional LLM thesis, PDF reports.
-
-## Quick Start
+## Run the app
 
 ```bash
 git clone https://github.com/DineshGupta-cloud/IndianMarket.git
 cd IndianMarket
-
 python -m venv venv
+
 # Windows:  venv\Scripts\activate
 # Mac/Linux: source venv/bin/activate
 
@@ -18,53 +16,45 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Optional: LLM-powered synthesis
+## Easiest way to add Groq LLM (one-time)
 
-Without a key, reports use **rule-based** bias (always works).
+1. Get a free key: https://console.groq.com/ → API Keys → Create
+2. In the project folder, create a file named **`.env`** with only this line:
 
-With a key, the Synthesis agent adds an **LLM investment thesis** (bull/bear cases, risks, confidence).
-
-### Recommended: free Groq key
-1. Create a key at [console.groq.com](https://console.groq.com/)
-2. Either:
-   - Paste it in the Streamlit sidebar, **or**
-   - Set env var and restart:
-
-```bash
-# Windows (PowerShell)
-$env:GROQ_API_KEY="your_key_here"
-
-# Mac/Linux
-export GROQ_API_KEY="your_key_here"
+```text
+GROQ_API_KEY=gsk_your_key_here
 ```
 
-Also supported: `OPENAI_API_KEY`, `LLM_API_KEY`, custom OpenAI-compatible `LLM_BASE_URL` + `LLM_MODEL`.
+3. Run:
 
-### CLI examples
+```bash
+streamlit run app.py
+```
+
+That’s it. The app loads the key automatically.  
+**Do not** put the key on GitHub. `.env` is already ignored.
+
+Windows (create file quickly):
+```powershell
+copy .env.example .env
+notepad .env
+```
+
+Mac/Linux:
+```bash
+cp .env.example .env
+nano .env
+```
+
+Without a key, research still works (rule-based synthesis only).
+
+## CLI (optional)
 
 ```bash
 python main.py RELIANCE --pdf
-python main.py RELIANCE --llm-key YOUR_KEY --pdf
-python main.py RELIANCE,TCS --no-llm
+python main.py RELIANCE,TCS,INFY --pdf
 ```
-
-## Features
-
-| Agent | Role |
-|-------|------|
-| Market Data | Prices, volume, returns |
-| Fundamental | Valuation & quality (yfinance) |
-| Screener.in | Top ratios, pros/cons |
-| Technical | RSI, MACD, SMAs, S/R |
-| News | Recent headlines |
-| FII/DII | Institutional cash flows |
-| Sentiment | Reddit keyword sentiment |
-| Macro & Risk | India checklist |
-| Synthesis | Rules + **optional LLM thesis** |
 
 ## Disclaimer
 
-Educational tool only. **Not financial advice.** Consult a SEBI-registered advisor.
-
----
-Built for the Indian markets 🇮🇳
+Educational only. **Not financial advice.**
