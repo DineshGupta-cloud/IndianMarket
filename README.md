@@ -1,60 +1,35 @@
 # IndianMarket 🇮🇳
 
-**Multi-Agent Equity Research for NSE/BSE** — one app for single stock, portfolio, optional LLM thesis, PDF.
+Multi-agent equity research for NSE/BSE + **saved portfolios (SQLite)**.
 
-## Run the app
+## Run
 
 ```bash
-git clone https://github.com/DineshGupta-cloud/IndianMarket.git
-cd IndianMarket
-python -m venv venv
-
-# Windows:  venv\Scripts\activate
-# Mac/Linux: source venv/bin/activate
-
+git pull
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Easiest way to add Groq LLM (one-time)
+### Tabs
+1. **Research** — single stock or ad-hoc list  
+2. **My Portfolios** — create / add stocks / research saved portfolios  
+3. **Stock list** — suggested NSE tickers  
 
-1. Get a free key: https://console.groq.com/ → API Keys → Create
-2. In the project folder, create a file named **`.env`** with only this line:
+### Example portfolios (auto-created first run)
+| Portfolio | Stocks |
+|-----------|--------|
+| **Core Long Term** | RELIANCE, TCS, HDFCBANK, INFY |
+| **Banking Basket** | HDFCBANK, ICICIBANK, SBIN, KOTAKBANK |
+| **Watchlist** | ITC, LT, BHARTIARTL, SUNPHARMA |
 
+Storage: `data/portfolios.db` (local SQLite). Export JSON backup from the Portfolios tab.
+
+### Optional LLM
+Create `.env`:
 ```text
-GROQ_API_KEY=gsk_your_key_here
+GROQ_API_KEY=gsk_your_key
 ```
-
-3. Run:
-
-```bash
-streamlit run app.py
-```
-
-That’s it. The app loads the key automatically.  
-**Do not** put the key on GitHub. `.env` is already ignored.
-
-Windows (create file quickly):
-```powershell
-copy .env.example .env
-notepad .env
-```
-
-Mac/Linux:
-```bash
-cp .env.example .env
-nano .env
-```
-
-Without a key, research still works (rule-based synthesis only).
-
-## CLI (optional)
-
-```bash
-python main.py RELIANCE --pdf
-python main.py RELIANCE,TCS,INFY --pdf
-```
+Free key: https://console.groq.com/
 
 ## Disclaimer
-
-Educational only. **Not financial advice.**
+Educational only. Not financial advice.

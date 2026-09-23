@@ -37,8 +37,9 @@ ENV/
 *.swp
 *.swo
 
-# Reports (keep structure but ignore generated content if desired)
-# reports/*.md
+# Local data
+data/*.db
+data/*.sqlite
 
 # OS
 .DS_Store
