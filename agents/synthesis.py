@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from datetime import datetime
 from .base import BaseAgent
 
@@ -29,7 +29,6 @@ class SynthesisAgent(BaseAgent):
         price = market.get("current_price", "N/A")
         change = market.get("day_change_pct", 0) or 0
 
-        # --- Rule-based bias (always computed as baseline) ---
         bias = "Neutral"
         reasons = []
 
@@ -42,6 +41,10 @@ class SynthesisAgent(BaseAgent):
             reasons.append("RSI indicates oversold conditions")
         elif tech.get("rsi_signal") == "Overbought":
             reasons.append("RSI indicates overbought conditions")
+
+        div = tech.get("rsi_divergence") or {}
+        for sig in div.get("signals") or []:
+            reasons.append(sig)
 
         flags = funda.get("flags", [])
         if "Strong ROE (>15%)" in flags:
@@ -66,7 +69,6 @@ class SynthesisAgent(BaseAgent):
         elif tech.get("trend_bias") == "Bearish" or "High trailing P/E" in flags:
             bias = "Cautious"
 
-        # --- Optional LLM thesis ---
         llm_result = None
         use_llm = llm_cfg.get("enabled", True)
         if use_llm:
@@ -145,34 +147,17 @@ class SynthesisAgent(BaseAgent):
         lines.append(f"**Overall Bias ({source}):** {bias}\n")
         lines.append("---\n")
 
-        # LLM thesis block
         if llm_result and not llm_result.get("error") and llm_result.get("thesis"):
             lines.append("## 1. LLM Investment Thesis")
             lines.append(llm_result["thesis"])
             lines.append("")
-            if llm_result.get("bull_case"):
-                lines.append("**Bull case**")
-                for b in llm_result["bull_case"]:
-                    lines.append(f"- {b}")
-                lines.append("")
-            if llm_result.get("bear_case"):
-                lines.append("**Bear case**")
-                for b in llm_result["bear_case"]:
-                    lines.append(f"- {b}")
-                lines.append("")
-            if llm_result.get("key_risks"):
-                lines.append("**Key risks**")
-                for r in llm_result["key_risks"]:
-                    lines.append(f"- {r}")
-                lines.append("")
-            if llm_result.get("what_to_watch"):
-                lines.append("**What to watch**")
-                for w in llm_result["what_to_watch"]:
-                    lines.append(f"- {w}")
-                lines.append("")
-            conf = llm_result.get("confidence")
-            model = llm_result.get("model", "")
-            lines.append(f"_Confidence: {conf}/10 · Model: {model}_\n")
+            for key, title in [("bull_case", "Bull case"), ("bear_case", "Bear case"), ("key_risks", "Key risks"), ("what_to_watch", "What to watch")]:
+                if llm_result.get(key):
+                    lines.append(f"**{title}**")
+                    for b in llm_result[key]:
+                        lines.append(f"- {b}")
+                    lines.append("")
+            lines.append(f"_Confidence: {llm_result.get('confidence')}/10 · Model: {llm_result.get('model', '')}_\n")
             lines.append("## 2. Rule-based Highlights")
         else:
             lines.append("## 1. Executive Summary")
@@ -182,7 +167,6 @@ class SynthesisAgent(BaseAgent):
         if reasons:
             lines.append("Key points:")
             for r in reasons:
-                # Avoid duplicating full thesis paragraph as a bullet if already shown
                 if llm_result and r == llm_result.get("thesis"):
                     continue
                 lines.append(f"- {r}")
@@ -212,118 +196,61 @@ class SynthesisAgent(BaseAgent):
             lines.append(f"**Flow Bias:** {fii_dii.get('flow_bias', 'N/A')}\n")
             lines.append("| Participant | Buy (₹ Cr) | Sell (₹ Cr) | Net (₹ Cr) |")
             lines.append("|-------------|------------|-------------|------------|")
-            lines.append(
-                f"| FII | {latest.get('fii_buy', 'N/A')} | {latest.get('fii_sell', 'N/A')} | {latest.get('fii_net', 'N/A')} |"
-            )
-            lines.append(
-                f"| DII | {latest.get('dii_buy', 'N/A')} | {latest.get('dii_sell', 'N/A')} | {latest.get('dii_net', 'N/A')} |"
-            )
+            lines.append(f"| FII | {latest.get('fii_buy', 'N/A')} | {latest.get('fii_sell', 'N/A')} | {latest.get('fii_net', 'N/A')} |")
+            lines.append(f"| DII | {latest.get('dii_buy', 'N/A')} | {latest.get('dii_sell', 'N/A')} | {latest.get('dii_net', 'N/A')} |")
             lines.append("")
-            recent = fii_dii.get("recent_5_sessions", [])
-            if recent:
-                lines.append("**Recent 5 sessions (Net ₹ Cr):**")
-                for row in recent:
-                    lines.append(
-                        f"- {row.get('date')}: FII {row.get('fii_net')} | DII {row.get('dii_net')}"
-                    )
-            lines.append(f"\n_{fii_dii.get('note', '')}_\n")
 
         lines.append("## Fundamental Snapshot")
         val = funda.get("valuation", {})
         prof = funda.get("profitability", {})
         health = funda.get("financial_health", {})
-        lines.append("### Valuation (yfinance)")
-        lines.append(f"- Trailing P/E: {val.get('trailing_pe', 'N/A')}")
-        lines.append(f"- Forward P/E: {val.get('forward_pe', 'N/A')}")
-        lines.append(f"- Price to Book: {val.get('price_to_book', 'N/A')}")
-        lines.append(f"- EV/EBITDA: {val.get('enterprise_to_ebitda', 'N/A')}")
-        lines.append("\n### Profitability & Quality")
-        lines.append(f"- ROE: {self._pct(prof.get('return_on_equity'))}")
-        lines.append(f"- ROA: {self._pct(prof.get('return_on_assets'))}")
-        lines.append(f"- Operating Margin: {self._pct(prof.get('operating_margins'))}")
-        lines.append(f"- Profit Margin: {self._pct(prof.get('profit_margins'))}")
-        lines.append("\n### Balance Sheet Health")
-        lines.append(f"- Debt to Equity: {health.get('debt_to_equity', 'N/A')}")
-        lines.append(f"- Current Ratio: {health.get('current_ratio', 'N/A')}")
+        lines.append(f"- Trailing P/E: {val.get('trailing_pe', 'N/A')} | Forward P/E: {val.get('forward_pe', 'N/A')}")
+        lines.append(f"- ROE: {self._pct(prof.get('return_on_equity'))} | Debt/Equity: {health.get('debt_to_equity', 'N/A')}")
         if funda.get("flags"):
-            lines.append("\n**Flags:** " + ", ".join(funda["flags"]))
-
+            lines.append("**Flags:** " + ", ".join(funda["flags"]))
         if screener and not screener.get("error"):
-            lines.append("\n### Screener.in Enrichment")
-            top = screener.get("top_ratios", {})
-            if top:
-                for k, v in list(top.items())[:12]:
-                    lines.append(f"- {k}: {v}")
             if screener.get("pros"):
-                lines.append("\n**Pros:**")
-                for p in screener["pros"]:
-                    lines.append(f"- {p}")
+                lines.append("**Screener pros:** " + "; ".join(screener["pros"][:4]))
             if screener.get("cons"):
-                lines.append("\n**Cons:**")
-                for c in screener["cons"]:
-                    lines.append(f"- {c}")
-            if screener.get("source_url"):
-                lines.append(f"\n_Source: [{screener['source_url']}]({screener['source_url']})_")
-
-        if funda.get("summary"):
-            lines.append(f"\n**Business Summary:**\n{funda['summary']}\n")
+                lines.append("**Screener cons:** " + "; ".join(screener["cons"][:4]))
         lines.append("")
 
         lines.append("## Technical Analysis")
         lines.append(f"- **Trend Bias:** {tech.get('trend_bias', 'N/A')}")
         lines.append(f"- **RSI (14):** {tech.get('rsi_14', 'N/A')} ({tech.get('rsi_signal', '')})")
         lines.append(f"- **SMA 20 / 50 / 200:** {tech.get('sma_20')} / {tech.get('sma_50')} / {tech.get('sma_200')}")
-        lines.append(f"- **MACD:** {tech.get('macd')} | Signal: {tech.get('macd_signal')} | Hist: {tech.get('macd_hist')}")
-        lines.append(f"- **Support (60d):** ₹{tech.get('support_60d')} | **Resistance (60d):** ₹{tech.get('resistance_60d')}")
-        lines.append(f"- **Price vs SMA50:** {tech.get('price_vs_sma50')}")
+        lines.append(f"- **MACD:** {tech.get('macd')} | Signal: {tech.get('macd_signal')}")
+        lines.append(f"- **Support / Resistance (60d):** ₹{tech.get('support_60d')} / ₹{tech.get('resistance_60d')}")
+
+        div = tech.get("rsi_divergence") or {}
+        lines.append("- **RSI divergence:**")
+        if div.get("signals"):
+            for s in div["signals"]:
+                lines.append(f"  - {s}")
+        else:
+            lines.append("  - None detected on recent swings")
         lines.append("")
 
         lines.append("## Social Sentiment (Reddit)")
-        lines.append(f"- **Label:** {sentiment.get('sentiment_label', 'N/A')}")
-        lines.append(f"- **Score:** {sentiment.get('sentiment_score', 'N/A')} "
-                     f"(pos hits: {sentiment.get('positive_hits', 0)}, "
-                     f"neg hits: {sentiment.get('negative_hits', 0)})")
-        lines.append(f"- **Posts analyzed:** {sentiment.get('post_count', 0)}")
-        top_posts = sentiment.get("top_posts", [])
-        if top_posts:
-            lines.append("\n**Top posts:**")
-            for p in top_posts[:5]:
-                lines.append(f"- [{p.get('title', '')[:80]}]({p.get('url', '')}) "
-                             f"(r/{p.get('subreddit')}, score {p.get('score')})")
-        lines.append(f"\n_{sentiment.get('note', '')}_\n")
+        lines.append(f"- **Label:** {sentiment.get('sentiment_label', 'N/A')} | Posts: {sentiment.get('post_count', 0)}")
+        lines.append("")
 
         lines.append("## Recent News")
         items = news.get("items", [])
         if items:
-            for i, item in enumerate(items[:6], 1):
+            for i, item in enumerate(items[:5], 1):
                 lines.append(f"{i}. **{item.get('title')}** ({item.get('publisher')})")
-                if item.get("summary"):
-                    lines.append(f"   {item['summary']}")
-                if item.get("link"):
-                    lines.append(f"   [Link]({item['link']})")
-                lines.append("")
         else:
-            lines.append("_No recent news items retrieved._\n")
-
-        lines.append("## Macro & Risk Context")
-        lines.append("**Key India Macro Factors to Monitor:**")
-        for f in macro.get("india_macro_factors", []):
-            lines.append(f"- {f}")
-        lines.append("\n**Risk Checklist:**")
-        for r in macro.get("risk_checklist", []):
-            lines.append(f"- {r}")
+            lines.append("_No recent news items retrieved._")
         lines.append("")
 
         lines.append("---")
         lines.append("## Disclaimer")
         lines.append(
-            "This report is generated by an automated multi-agent research system for educational "
-            "and informational purposes only. It does **not** constitute investment advice, "
-            "a recommendation, or an offer to buy/sell any securities. Always conduct your own "
-            "due diligence and consult a SEBI-registered advisor before making investment decisions."
+            "Educational / informational only. Not investment advice. "
+            "Consult a SEBI-registered advisor before investing."
         )
         lines.append("\n*Powered by IndianMarket multi-agent system*")
-
         return "\n".join(lines)
 
     def _fmt_cr(self, value):

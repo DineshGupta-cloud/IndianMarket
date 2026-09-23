@@ -1,6 +1,6 @@
 # IndianMarket 🇮🇳
 
-Multi-agent NSE/BSE research + **portfolios (SQLite)** + **watchlist alerts**.
+Multi-agent NSE/BSE research + portfolios + alerts (RSI divergence) + optional Telegram.
 
 ## Run
 
@@ -10,33 +10,41 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-### Tabs
-| Tab | What it does |
-|-----|----------------|
-| **Research** | Single stock or ad-hoc list |
-| **My Portfolios** | Create / add stocks / research (saved in SQLite) |
-| **Alerts** | Price, day %, RSI scan on portfolio or custom list |
-| **Stock list** | Suggested tickers |
+## Telegram notifications (safe setup)
 
-### Example portfolios (first run)
-- **Core Long Term** — RELIANCE, TCS, HDFCBANK, INFY  
-- **Banking Basket** — HDFCBANK, ICICIBANK, SBIN, KOTAKBANK  
-- **Watchlist** — ITC, LT, BHARTIARTL, SUNPHARMA  
+**Do not put bot tokens in code or GitHub.**
 
-DB: `data/portfolios.db`
+1. Open `.env` in the project folder (create from `.env.example` if needed):
 
-### Alerts
-Scan a portfolio or custom tickers for:
-- Price above / below a level  
-- Day move beyond ±X%  
-- RSI overbought / oversold  
-
-### Optional LLM
-`.env` file:
 ```text
-GROQ_API_KEY=gsk_your_key
+TELEGRAM_BOT_TOKEN=your_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
 ```
-https://console.groq.com/
+
+2. Test:
+
+```bash
+python scripts/test_telegram.py
+```
+
+3. In the app **Alerts** tab, run a scan and enable **Send to Telegram** (if shown) or messages will use the same helper.
+
+If you ever pasted a token in chat, **revoke it in BotFather** and create a new one.
+
+## RSI divergence
+
+Technical agent + alerts detect:
+- Regular bullish / bearish
+- Hidden bullish / bearish
+
+Shown in research reports and alert scans.
+
+## Optional LLM
+
+```text
+GROQ_API_KEY=gsk_...
+```
 
 ## Disclaimer
+
 Educational only. Not financial advice.
