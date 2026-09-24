@@ -1,50 +1,52 @@
 # IndianMarket 🇮🇳
 
-Multi-agent NSE/BSE research + portfolios + alerts (RSI divergence) + optional Telegram.
+Multi-agent NSE/BSE research — **one dashboard** with charts, EMA50/SMA200 crossover dates, portfolios, alerts, and BUY/SELL/HOLD.
 
 ## Run
 
 ```bash
-git pull
+git clone https://github.com/DineshGupta-cloud/IndianMarket.git
+cd IndianMarket
+python -m venv venv
+# Windows: venv\Scripts\activate
+# Mac/Linux: source venv/bin/activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Telegram notifications (safe setup)
+## Single dashboard (`app.py`)
 
-**Do not put bot tokens in code or GitHub.**
+| Section | What it does |
+|--------|----------------|
+| **Chart** | Close + EMA50 + SMA200 for searched ticker |
+| **Last cross date** | When EMA50 last crossed SMA200 |
+| **MA scan board** | All symbols in universe + crossover date column |
+| **Research** | Multi-agent report + technical BUY/SELL/HOLD |
+| **Quick alerts** | Price, RSI, MA cross alerts |
+| **Portfolios** | SQLite saved lists |
 
-1. Open `.env` in the project folder (create from `.env.example` if needed):
+### Sidebar
+- Search ticker
+- Period
+- MA scan universe: Suggested stocks / Portfolio / Custom
+- Optional LLM key (or `.env` `GROQ_API_KEY`)
+
+## Optional `.env`
 
 ```text
-TELEGRAM_BOT_TOKEN=your_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
+GROQ_API_KEY=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
 ```
 
-2. Test:
+Copy from `.env.example`. Never commit real secrets.
+
+## CLI (optional)
 
 ```bash
-python scripts/test_telegram.py
-```
-
-3. In the app **Alerts** tab, run a scan and enable **Send to Telegram** (if shown) or messages will use the same helper.
-
-If you ever pasted a token in chat, **revoke it in BotFather** and create a new one.
-
-## RSI divergence
-
-Technical agent + alerts detect:
-- Regular bullish / bearish
-- Hidden bullish / bearish
-
-Shown in research reports and alert scans.
-
-## Optional LLM
-
-```text
-GROQ_API_KEY=gsk_...
+python main.py RELIANCE --pdf
 ```
 
 ## Disclaimer
 
-Educational only. Not financial advice.
+Educational only. **Not financial advice.**
