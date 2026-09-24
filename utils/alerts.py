@@ -1,6 +1,4 @@
-"""
-Watchlist alerts: price, day %, RSI, divergence, EMA50/SMA200 crossover.
-"""
+"""Watchlist alerts: price, RSI, divergence, EMA50/SMA200 + crossover date."""
 
 from __future__ import annotations
 
@@ -24,36 +22,45 @@ def fetch_snapshot(ticker: str, include_divergence: bool = True) -> Dict[str, An
     t = ticker.upper().strip()
     if t.endswith(".NS") or t.endswith(".BO"):
         t = t[:-3]
-    ns = f"{t}.NS"
     try:
-        stock = yf.Ticker(ns)
-        hist = stock.history(period="1y")
-        if hist.empty:
-            return {"ticker": t, "error": "No data"}
-        last = hist.iloc[-1]
-        prev = hist.iloc[-2] if len(hist) > 1 else last
-        price = float(last["Close"])
-        prev_c = float(prev["Close"])
-        day_pct = ((price - prev_c) / prev_c) * 100 if prev_c else 0.0
-        close = hist["Close"]
-        rsi_series = compute_rsi_series(close)
-        rsi = round(float(rsi_series.iloc[-1]), 2) if not pd_isna(rsi_series.iloc[-1]) else None
+        chart = fetch_chart_frame(t, period="2y")
+        if chart.get("error"):
+            return {"ticker": t, "error": chart["error"]}
 
+        stock = yf.Ticker(f"{t}.NS")
+        hist = stock.history(period="5d")
+        day_pct = 0.0
+        if hist is not None and len(hist) >= 2:
+            price = float(hist["Close"].iloc[-1])
+            prev = float(hist["Close"].iloc[-2])
+            day_pct = ((price - prev) / prev) * 100 if prev else 0.0
+        else:
+            price = chart.get("price") or 0.0
+
+        # RSI from longer history inside chart df if present
+        rsi = None
         div = None
-        if include_divergence:
-            div = detect_rsi_divergence(close, rsi_series, order=5)
-
-        chart = fetch_chart_frame(t, period="1y")
+        if chart.get("df") is not None and "Close" in chart["df"].columns:
+            close = chart["df"]["Close"].dropna()
+            # Need fuller series — refetch short for RSI only if needed
+            full = yf.Ticker(f"{t}.NS").history(period="6mo")
+            if not full.empty:
+                rsi_series = compute_rsi_series(full["Close"])
+                if not pd_isna(rsi_series.iloc[-1]):
+                    rsi = round(float(rsi_series.iloc[-1]), 2)
+                if include_divergence:
+                    div = detect_rsi_divergence(full["Close"], rsi_series, order=5)
 
         return {
             "ticker": t,
-            "price": round(price, 2),
+            "price": round(float(price), 2),
             "day_change_pct": round(day_pct, 2),
             "rsi_14": rsi,
             "rsi_divergence": div,
             "ema50": chart.get("ema50"),
             "sma200": chart.get("sma200"),
             "cross_status": chart.get("cross_status"),
+            "crossover_date": chart.get("crossover_date"),
             "price_vs_sma200": chart.get("price_vs_sma200"),
             "error": None,
         }
@@ -84,23 +91,21 @@ def evaluate_alerts(
         price = snap["price"]
         day_pct = snap["day_change_pct"]
         rsi = snap.get("rsi_14")
+        cdate = snap.get("crossover_date") or "N/A"
 
         if price_above is not None and price >= price_above:
-            fired.append(f"Price ₹{price} ≥ above level ₹{price_above}")
+            fired.append(f"Price ₹{price} ≥ ₹{price_above}")
         if price_below is not None and price <= price_below:
-            fired.append(f"Price ₹{price} ≤ below level ₹{price_below}")
+            fired.append(f"Price ₹{price} ≤ ₹{price_below}")
 
         if day_change_abs_pct is not None and abs(day_pct) >= day_change_abs_pct:
-            direction = "up" if day_pct > 0 else "down"
-            fired.append(
-                f"Day move {day_pct:+.2f}% ({direction}) exceeds ±{day_change_abs_pct}%"
-            )
+            fired.append(f"Day move {day_pct:+.2f}% exceeds ±{day_change_abs_pct}%")
 
         if check_rsi and rsi is not None:
             if rsi >= rsi_overbought:
-                fired.append(f"RSI {rsi} overbought (≥ {rsi_overbought})")
+                fired.append(f"RSI {rsi} overbought")
             if rsi <= rsi_oversold:
-                fired.append(f"RSI {rsi} oversold (≤ {rsi_oversold})")
+                fired.append(f"RSI {rsi} oversold")
 
         if check_divergence and snap.get("rsi_divergence"):
             for sig in snap["rsi_divergence"].get("signals") or []:
@@ -109,9 +114,13 @@ def evaluate_alerts(
         if check_ma_cross:
             cs = snap.get("cross_status")
             if cs == "bullish_cross":
-                fired.append("EMA50 crossed ABOVE SMA200 (bullish)")
+                fired.append(f"EMA50 crossed ABOVE SMA200 on {cdate}")
             elif cs == "bearish_cross":
-                fired.append("EMA50 crossed BELOW SMA200 (bearish)")
+                fired.append(f"EMA50 crossed BELOW SMA200 on {cdate}")
+            elif cs == "ema50_above_sma200":
+                fired.append(f"EMA50 above SMA200 (last cross {cdate})")
+            elif cs == "ema50_below_sma200":
+                fired.append(f"EMA50 below SMA200 (last cross {cdate})")
             if snap.get("price_vs_sma200") == "above":
                 fired.append("Price above SMA200")
             elif snap.get("price_vs_sma200") == "below":
