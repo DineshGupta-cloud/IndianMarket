@@ -1,5 +1,7 @@
 """
-IndianMarket – Research | Portfolios | Alerts | MA Scan | Charts
+IndianMarket – ONE DASHBOARD
+Search · Chart · MA table (with crossover dates) · Research · Alerts
+
 Run:  streamlit run app.py
 """
 
@@ -15,18 +17,14 @@ from utils.portfolio_store import (
     SUGGESTED_STOCKS,
     add_holding,
     create_portfolio,
-    delete_portfolio,
-    export_json,
     get_holdings,
     init_db,
     list_portfolios,
-    remove_holding,
     tickers_csv,
 )
-from utils.telegram_notify import format_alert_message, is_telegram_configured, send_telegram_message
 
 st.set_page_config(
-    page_title="IndianMarket",
+    page_title="IndianMarket Dashboard",
     page_icon="🇮🇳",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -34,332 +32,212 @@ st.set_page_config(
 
 init_db(seed_examples=True)
 
+# ---------------------------------------------------------------------------
+# Sidebar controls
+# ---------------------------------------------------------------------------
 with st.sidebar:
     st.title("🇮🇳 IndianMarket")
-    st.caption("Research · Charts · MA alerts")
+    st.caption("Single dashboard")
 
-    period = st.selectbox("History period", ["6mo", "1y", "2y", "5y"], index=1)
-    export_pdf = st.checkbox("Export PDF", value=True)
+    ticker = st.text_input("Search ticker", value="RELIANCE").upper().strip()
+    if ticker.endswith(".NS") or ticker.endswith(".BO"):
+        ticker = ticker[:-3]
 
-    st.markdown("---")
-    st.markdown("**LLM (optional)**")
-    use_llm = st.checkbox("Enable LLM thesis", value=True)
-    llm_key = st.text_input("API key", type="password", placeholder="Or use .env GROQ_API_KEY")
-    llm_provider = st.selectbox("Provider", ["Groq (free tier)", "OpenAI", "Custom"], index=0)
-    if llm_provider == "OpenAI":
-        default_base, default_model = "https://api.openai.com/v1", "gpt-4o-mini"
-    else:
-        default_base, default_model = "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"
-    llm_base = st.text_input("Base URL", value=default_base)
-    llm_model = st.text_input("Model", value=default_model)
-
-    if use_llm and is_llm_available(api_key=llm_key or None):
-        st.success("LLM key ready")
-    elif use_llm:
-        st.info("No key → rule-based synthesis")
+    period = st.selectbox("Period", ["6mo", "1y", "2y", "5y"], index=2)
+    export_pdf = st.checkbox("PDF on research", value=False)
 
     st.markdown("---")
-    st.caption("Educational only • Not investment advice")
+    st.markdown("**MA scan universe**")
+    universe = st.radio(
+        "Scan",
+        ["Suggested stocks", "Portfolio", "Custom"],
+        index=0,
+    )
+    custom_list = st.text_input(
+        "Custom tickers",
+        value="RELIANCE,TCS,INFY,HDFCBANK,ICICIBANK,SBIN,ITC,LT",
+    ).upper()
+
+    st.markdown("---")
+    use_llm = st.checkbox("LLM thesis", value=False)
+    llm_key = st.text_input("API key", type="password", placeholder=".env GROQ_API_KEY")
+    st.caption("Educational only • Not advice")
 
 llm_config = {
     "enabled": use_llm,
     "api_key": llm_key or None,
-    "base_url": llm_base or None,
-    "model": llm_model or None,
+    "base_url": None,
+    "model": None,
 }
 
+# Resolve scan list
+if universe == "Suggested stocks":
+    scan_tickers = [s["ticker"] for s in SUGGESTED_STOCKS]
+elif universe == "Portfolio":
+    pfs = list_portfolios()
+    if pfs:
+        scan_tickers = [h["ticker"] for h in get_holdings(pfs[0]["id"])]
+        for p in pfs[1:]:
+            scan_tickers += [h["ticker"] for h in get_holdings(p["id"])]
+        scan_tickers = sorted(set(scan_tickers))
+    else:
+        scan_tickers = []
+else:
+    scan_tickers = [p.strip() for p in custom_list.replace(";", ",").split(",") if p.strip()]
 
-def show_chart(ticker: str, chart_period: str = "1y"):
-    """Render Close + EMA50 + SMA200 on screen."""
-    info = fetch_chart_frame(ticker, period=chart_period)
+# ---------------------------------------------------------------------------
+# Header actions
+# ---------------------------------------------------------------------------
+st.title("IndianMarket Dashboard")
+st.caption("Chart · EMA50/SMA200 with **crossover date** · Research · Alerts — all in one place")
+
+c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
+run_chart = c_btn1.button("📈 Load chart", type="primary", use_container_width=True)
+run_scan = c_btn2.button("📊 Run MA scan", use_container_width=True)
+run_research = c_btn3.button("🤖 Run research", use_container_width=True)
+run_alerts = c_btn4.button("🔔 Quick alerts", use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# ROW 1: Chart + key metrics for searched ticker
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.subheader(f"1. Chart & crossover — **{ticker or '—'}**")
+
+if run_chart or run_research or (ticker and "chart_loaded" not in st.session_state):
+    # Auto-load chart once per session for default ticker
+    st.session_state["chart_loaded"] = True
+    do_chart = True
+else:
+    do_chart = run_chart
+
+if ticker and (do_chart or run_chart or run_research):
+    info = fetch_chart_frame(ticker, period=period)
     if info.get("error") or info.get("df") is None:
-        st.warning(f"Chart unavailable: {info.get('error', 'no data')}")
-        return
-    df = info["df"][["Close", "EMA50", "SMA200"]].copy()
-    st.subheader(f"Chart: {info['ticker']}")
-    st.caption(
-        f"Price ₹{info.get('price')} · EMA50 ₹{info.get('ema50')} · "
-        f"SMA200 ₹{info.get('sma200')} · Status: {info.get('cross_status')}"
-    )
-    st.line_chart(df)
-
-
-def run_research(ticker_arg: str):
-    with st.spinner(f"Running multi-agent research on **{ticker_arg}**..."):
-        try:
-            orch = ResearchOrchestrator(
-                ticker=ticker_arg, period=period, llm_config=llm_config
-            )
-            report_path = orch.run(export_pdf=export_pdf)
-            synthesis = orch.results.get("synthesis", {})
-
-            if synthesis.get("portfolio_summaries"):
-                st.success(f"Portfolio report ready: {ticker_arg}")
-                st.dataframe(synthesis["portfolio_summaries"], use_container_width=True)
-            else:
-                market = orch.results.get("market_data", {})
-                tech = orch.results.get("technical", {})
-                llm_out = synthesis.get("llm") or {}
-
-                st.success(f"Report ready: **{synthesis.get('company', ticker_arg)}**")
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Company", synthesis.get("company", ticker_arg))
-                c2.metric(
-                    "Price",
-                    f"₹{market.get('current_price', 'N/A')}",
-                    f"{market.get('day_change_pct', 0):+.2f}%",
-                )
-                c3.metric("Action", synthesis.get("action") or synthesis.get("bias", "N/A"))
-                c4.metric("RSI", tech.get("rsi_14", "N/A"), tech.get("rsi_signal", ""))
-
-                # Chart for single-ticker research
-                primary = ticker_arg.split(",")[0].strip()
-                show_chart(primary, chart_period=period)
-
-                if llm_out and not llm_out.get("error") and llm_out.get("thesis"):
-                    st.subheader("LLM Thesis")
-                    st.write(llm_out["thesis"])
-
-            st.subheader("Full report")
-            st.markdown(synthesis.get("report_markdown", "_No report_"))
-
-            d1, d2 = st.columns(2)
-            with d1:
-                st.download_button(
-                    "📄 Markdown",
-                    data=synthesis.get("report_markdown", ""),
-                    file_name=report_path.name,
-                    mime="text/markdown",
-                    use_container_width=True,
-                )
-            pdf_path = report_path.with_suffix(".pdf")
-            if pdf_path.exists():
-                with d2:
-                    with open(pdf_path, "rb") as f:
-                        st.download_button(
-                            "📄 PDF",
-                            data=f,
-                            file_name=pdf_path.name,
-                            mime="application/pdf",
-                            use_container_width=True,
-                        )
-        except Exception as e:
-            st.error(f"Research failed: {e}")
-            st.code(traceback.format_exc())
-
-
-tab_research, tab_charts, tab_ma, tab_portfolios, tab_alerts, tab_stocks = st.tabs(
-    [
-        "📊 Research",
-        "📈 Charts",
-        "📉 MA Scan",
-        "💼 Portfolios",
-        "🔔 Alerts",
-        "📋 Stocks",
-    ]
-)
-
-# ===== Research =====
-with tab_research:
-    st.header("Quick research")
-    mode = st.radio("Mode", ["Single Stock", "Ad-hoc list"], horizontal=True)
-    if mode == "Single Stock":
-        t_in = st.text_input("NSE ticker", value="RELIANCE", key="res_t").upper().strip()
+        st.warning(info.get("error", "No chart data"))
     else:
-        t_in = st.text_input("Tickers", value="RELIANCE,TCS,INFY", key="res_list").upper().strip()
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Price", f"₹{info.get('price')}")
+        m2.metric("EMA50", f"₹{info.get('ema50')}")
+        m3.metric("SMA200", f"₹{info.get('sma200')}")
+        m4.metric("vs SMA200", info.get("price_vs_sma200") or "—")
+        m5.metric("Last cross date", info.get("crossover_date") or "—")
 
-    if st.button("🚀 Run Research", type="primary", key="run_research"):
-        parts = []
-        for p in t_in.replace(";", ",").split(","):
-            p = p.strip()
-            if p.endswith(".NS") or p.endswith(".BO"):
-                p = p[:-3]
-            if p:
-                parts.append(p)
-        if not parts:
-            st.warning("Enter at least one ticker")
-        else:
-            run_research(",".join(parts))
+        st.caption(
+            f"Status: **{info.get('cross_status')}** · "
+            f"Last EMA50/SMA200 crossover: **{info.get('crossover_date') or 'N/A'}** "
+            f"({info.get('crossover_kind') or ''})"
+        )
+        st.line_chart(info["df"][["Close", "EMA50", "SMA200"]])
+elif not ticker:
+    st.info("Enter a ticker in the sidebar.")
+else:
+    st.info("Click **Load chart** to show price / EMA50 / SMA200.")
 
-# ===== Charts =====
-with tab_charts:
-    st.header("Price chart (Close + EMA50 + SMA200)")
-    chart_ticker = st.text_input("Search ticker", value="RELIANCE", key="chart_t").upper().strip()
-    chart_period = st.selectbox("Chart period", ["6mo", "1y", "2y", "5y"], index=1, key="chart_p")
-    if st.button("Show chart", type="primary", key="show_chart"):
-        if chart_ticker.endswith(".NS") or chart_ticker.endswith(".BO"):
-            chart_ticker = chart_ticker[:-3]
-        if not chart_ticker:
-            st.warning("Enter a ticker")
-        else:
-            show_chart(chart_ticker, chart_period)
-            # Optional quick metrics
-            info = fetch_chart_frame(chart_ticker, chart_period)
-            if not info.get("error"):
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Price", f"₹{info.get('price')}")
-                m2.metric("EMA50", f"₹{info.get('ema50')}")
-                m3.metric("SMA200", f"₹{info.get('sma200')}")
-                m4.metric("Cross", info.get("cross_status", "n/a"))
+# ---------------------------------------------------------------------------
+# ROW 2: MA scan table (all stocks in universe) WITH DATES
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.subheader("2. MA scan board (all symbols in universe)")
+st.caption("Includes **crossover date** when EMA50 last crossed SMA200.")
 
-# ===== MA Scan (EMA50 / SMA200) =====
-with tab_ma:
-    st.header("EMA50 × SMA200 scan")
-    st.caption(
-        "Lists price vs SMA200 and EMA50/SMA200 position or fresh crossover. "
-        "Scans suggested list, a portfolio, or custom tickers (not entire NSE)."
-    )
-
-    scan_src = st.radio(
-        "Universe",
-        ["Suggested stocks", "Saved portfolio", "Custom list"],
-        horizontal=True,
-        key="ma_src",
-    )
-    scan_tickers: list[str] = []
-    if scan_src == "Suggested stocks":
-        scan_tickers = [s["ticker"] for s in SUGGESTED_STOCKS]
-    elif scan_src == "Saved portfolio":
-        pfs = list_portfolios()
-        if not pfs:
-            st.warning("No portfolios")
-        else:
-            lm = {p["name"]: p["id"] for p in pfs}
-            pn = st.selectbox("Portfolio", list(lm.keys()), key="ma_pf")
-            scan_tickers = [h["ticker"] for h in get_holdings(lm[pn])]
-    else:
-        raw = st.text_input(
-            "Tickers",
-            value=",".join(s["ticker"] for s in SUGGESTED_STOCKS[:10]),
-            key="ma_custom",
-        ).upper()
-        scan_tickers = [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
-
-    filter_only_cross = st.checkbox("Only show fresh crossovers (bullish/bearish cross)", value=False)
-    send_tg = st.checkbox("Send results to Telegram", value=False)
-    if send_tg and not is_telegram_configured():
-        st.info("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env to enable Telegram.")
-
-    if st.button("🔍 Run MA scan", type="primary", key="ma_run"):
+if run_scan or st.session_state.get("ma_rows"):
+    if run_scan:
         if not scan_tickers:
-            st.warning("No tickers")
+            st.warning("No tickers to scan")
+            st.session_state["ma_rows"] = []
         else:
             with st.spinner(f"Scanning {len(scan_tickers)} symbols..."):
-                rows = scan_ma_crossovers(scan_tickers, period="1y")
+                st.session_state["ma_rows"] = scan_ma_crossovers(scan_tickers, period="2y")
 
-            if filter_only_cross:
-                rows_view = [
-                    r
-                    for r in rows
-                    if r.get("cross_status") in ("bullish_cross", "bearish_cross")
-                ]
-            else:
-                rows_view = rows
+    rows = st.session_state.get("ma_rows") or []
+    if rows:
+        bull = [r for r in rows if r.get("cross_status") == "bullish_cross"]
+        bear = [r for r in rows if r.get("cross_status") == "bearish_cross"]
+        above = [r for r in rows if r.get("price_vs_sma200") == "above"]
 
-            bull = [r for r in rows if r.get("cross_status") == "bullish_cross"]
-            bear = [r for r in rows if r.get("cross_status") == "bearish_cross"]
-            above = [r for r in rows if r.get("price_vs_sma200") == "above"]
+        a, b, c = st.columns(3)
+        a.metric("Fresh bullish cross", len(bull))
+        b.metric("Fresh bearish cross", len(bear))
+        c.metric("Price above SMA200", len(above))
 
-            a, b, c = st.columns(3)
-            a.metric("Fresh bullish cross", len(bull))
-            b.metric("Fresh bearish cross", len(bear))
-            c.metric("Price above SMA200", len(above))
+        st.dataframe(
+            [
+                {
+                    "Ticker": r.get("ticker"),
+                    "Price": r.get("price"),
+                    "EMA50": r.get("ema50"),
+                    "SMA200": r.get("sma200"),
+                    "Cross status": r.get("cross_status"),
+                    "Crossover date": r.get("crossover_date") or "—",
+                    "vs SMA200": r.get("price_vs_sma200"),
+                    "Alert": r.get("alert") or r.get("error"),
+                }
+                for r in rows
+            ],
+            use_container_width=True,
+            height=420,
+        )
 
-            st.subheader("Results")
-            st.dataframe(
-                [
-                    {
-                        "Ticker": r.get("ticker"),
-                        "Price": r.get("price"),
-                        "EMA50": r.get("ema50"),
-                        "SMA200": r.get("sma200"),
-                        "Cross": r.get("cross_status"),
-                        "vs SMA200": r.get("price_vs_sma200"),
-                        "Alert": r.get("alert") or r.get("error"),
-                    }
-                    for r in rows_view
-                ],
-                use_container_width=True,
+        if bull or bear:
+            st.markdown("**Fresh crossovers**")
+            for r in bull + bear:
+                st.warning(
+                    f"{r['ticker']}: {r.get('alert')} · date **{r.get('crossover_date') or 'N/A'}**"
+                )
+else:
+    st.info("Click **Run MA scan** to list all symbols with crossover dates.")
+
+# ---------------------------------------------------------------------------
+# ROW 3: Research + recommendation
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.subheader("3. Multi-agent research (BUY / SELL / HOLD)")
+
+if run_research and ticker:
+    with st.spinner(f"Researching {ticker}..."):
+        try:
+            orch = ResearchOrchestrator(
+                ticker=ticker, period=period, llm_config=llm_config
             )
+            path = orch.run(export_pdf=export_pdf)
+            syn = orch.results.get("synthesis", {})
+            tech = orch.results.get("technical", {})
+            market = orch.results.get("market_data", {})
 
-            if bull or bear:
-                st.subheader("Fresh crossovers")
-                for r in bull + bear:
-                    st.warning(f"**{r['ticker']}**: {r.get('alert')}")
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Action", syn.get("action") or syn.get("bias", "—"))
+            r2.metric("Score", tech.get("action_score", "—"))
+            r3.metric("RSI", tech.get("rsi_14", "—"))
+            r4.metric("Price", f"₹{market.get('current_price', '—')}")
 
-            if send_tg and is_telegram_configured():
-                msg_rows = [
-                    {
-                        "ticker": r["ticker"],
-                        "price": r.get("price"),
-                        "day_change_pct": 0,
-                        "rsi_14": "—",
-                        "alerts": [r.get("alert") or r.get("cross_status")],
-                    }
-                    for r in rows
-                    if r.get("cross_status") in ("bullish_cross", "bearish_cross")
-                    or r.get("price_vs_sma200")
-                ]
-                text = format_alert_message(msg_rows[:20])
-                res = send_telegram_message("MA Scan\n" + text)
-                if res.get("ok"):
-                    st.success("Sent to Telegram")
-                else:
-                    st.error(res.get("error", "Telegram failed"))
+            st.markdown(syn.get("report_markdown", "_No report_"))
+            st.caption(f"Saved: {path}")
+        except Exception as e:
+            st.error(str(e))
+            st.code(traceback.format_exc())
+elif run_research:
+    st.warning("Enter a ticker first")
 
-# ===== Portfolios (compact) =====
-with tab_portfolios:
-    st.header("Saved portfolios")
-    portfolios = list_portfolios()
-    with st.expander("Create portfolio"):
-        nn = st.text_input("Name", key="npn")
-        if st.button("Create", key="npc") and nn:
-            try:
-                create_portfolio(nn)
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))
-    if portfolios:
-        names = {f"{p['name']}": p for p in portfolios}
-        choice = st.selectbox("Portfolio", list(names.keys()), key="pf2")
-        pid = names[choice]["id"]
-        holdings = get_holdings(pid)
-        st.dataframe(holdings, use_container_width=True)
-        add_t = st.text_input("Add ticker", key="pfa").upper().strip()
-        if st.button("Add") and add_t:
-            add_holding(pid, add_t)
-            st.rerun()
-        if holdings and st.button("Research portfolio"):
-            run_research(tickers_csv(pid))
+# ---------------------------------------------------------------------------
+# ROW 4: Quick alerts on same universe
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.subheader("4. Quick alerts (price / RSI / MA)")
 
-# ===== Alerts =====
-with tab_alerts:
-    st.header("Watchlist alerts")
-    source = st.radio("Source", ["Suggested stocks", "Custom"], horizontal=True, key="al_src")
-    if source == "Suggested stocks":
-        tickers = [s["ticker"] for s in SUGGESTED_STOCKS]
+if run_alerts:
+    targets = scan_tickers or ([ticker] if ticker else [])
+    if not targets:
+        st.warning("No symbols")
     else:
-        tickers = [
-            p.strip()
-            for p in st.text_input("Tickers", "RELIANCE,TCS,HDFCBANK", key="al_t").upper().split(",")
-            if p.strip()
-        ]
-    check_ma = st.checkbox("EMA50 / SMA200 alerts", value=True)
-    check_rsi = st.checkbox("RSI", value=True)
-    if st.button("Run alert scan", type="primary", key="al_run"):
-        with st.spinner("Scanning..."):
-            rows = evaluate_alerts(
-                tickers,
+        with st.spinner("Alert scan..."):
+            alert_rows = evaluate_alerts(
+                targets,
                 day_change_abs_pct=2.0,
-                check_rsi=check_rsi,
-                check_ma_cross=check_ma,
+                check_rsi=True,
+                check_ma_cross=True,
             )
-        triggered = [r for r in rows if r.get("alerts")]
-        st.subheader(f"Triggered ({len(triggered)})")
-        for r in triggered:
-            st.markdown(f"**{r['ticker']}** ₹{r.get('price')} · RSI {r.get('rsi_14')}")
-            for a in r["alerts"]:
-                st.warning(a)
+        triggered = [r for r in alert_rows if r.get("alerts")]
+        st.write(f"Triggered: **{len(triggered)}** / {len(alert_rows)}")
         st.dataframe(
             [
                 {
@@ -368,14 +246,35 @@ with tab_alerts:
                     "EMA50": r.get("ema50"),
                     "SMA200": r.get("sma200"),
                     "Cross": r.get("cross_status"),
+                    "Cross date": r.get("crossover_date", "—")
+                    if "crossover_date" in r
+                    else "—",
                     "Alerts": "; ".join(r.get("alerts") or []),
                 }
-                for r in rows
+                for r in alert_rows
             ],
             use_container_width=True,
+            height=360,
         )
 
-# ===== Stocks =====
-with tab_stocks:
-    st.header("Suggested NSE stocks")
-    st.dataframe(SUGGESTED_STOCKS, use_container_width=True)
+# ---------------------------------------------------------------------------
+# ROW 5: Portfolio strip (optional)
+# ---------------------------------------------------------------------------
+st.markdown("---")
+with st.expander("Portfolios (optional)"):
+    pfs = list_portfolios()
+    if pfs:
+        for p in pfs:
+            hs = get_holdings(p["id"])
+            st.write(f"**{p['name']}**: ", ", ".join(h["ticker"] for h in hs) or "(empty)")
+    nn = st.text_input("New portfolio name")
+    if st.button("Create portfolio") and nn:
+        create_portfolio(nn)
+        st.rerun()
+    if pfs:
+        add_to = st.selectbox("Add ticker to", [p["name"] for p in pfs])
+        add_tk = st.text_input("Ticker to add").upper().strip()
+        if st.button("Add holding") and add_tk:
+            pid = next(p["id"] for p in pfs if p["name"] == add_to)
+            add_holding(pid, add_tk)
+            st.rerun()

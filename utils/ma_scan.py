@@ -1,8 +1,4 @@
-"""
-Scan tickers for:
-  - Price vs SMA200
-  - EMA50 vs SMA200 (position + fresh crossover)
-"""
+"""Scan tickers for EMA50/SMA200 position, crossover, and crossover date."""
 
 from __future__ import annotations
 
@@ -11,7 +7,7 @@ from typing import Any, Dict, List
 from utils.charts import fetch_chart_frame
 
 
-def scan_ma_crossovers(tickers: List[str], period: str = "1y") -> List[Dict[str, Any]]:
+def scan_ma_crossovers(tickers: List[str], period: str = "2y") -> List[Dict[str, Any]]:
     rows = []
     for t in tickers:
         info = fetch_chart_frame(t, period=period)
@@ -24,6 +20,7 @@ def scan_ma_crossovers(tickers: List[str], period: str = "1y") -> List[Dict[str,
                     "ema50": None,
                     "sma200": None,
                     "cross_status": None,
+                    "crossover_date": None,
                     "price_vs_sma200": None,
                     "alert": f"Error: {info['error']}",
                 }
@@ -31,21 +28,24 @@ def scan_ma_crossovers(tickers: List[str], period: str = "1y") -> List[Dict[str,
             continue
 
         cross = info.get("cross_status") or "none"
-        alert = None
+        cdate = info.get("crossover_date")
+
         if cross == "bullish_cross":
-            alert = "EMA50 crossed ABOVE SMA200 (bullish crossover)"
+            alert = f"EMA50 crossed ABOVE SMA200 on {cdate or 'N/A'}"
         elif cross == "bearish_cross":
-            alert = "EMA50 crossed BELOW SMA200 (bearish crossover)"
+            alert = f"EMA50 crossed BELOW SMA200 on {cdate or 'N/A'}"
         elif cross == "ema50_above_sma200":
-            alert = "EMA50 above SMA200"
+            alert = f"EMA50 above SMA200 (last cross: {cdate or 'N/A'})"
         elif cross == "ema50_below_sma200":
-            alert = "EMA50 below SMA200"
+            alert = f"EMA50 below SMA200 (last cross: {cdate or 'N/A'})"
+        else:
+            alert = None
 
         vs = info.get("price_vs_sma200")
         if vs == "above":
-            alert = (alert or "") + (" | Price above SMA200" if alert else "Price above SMA200")
+            alert = (alert + " | " if alert else "") + "Price above SMA200"
         elif vs == "below":
-            alert = (alert or "") + (" | Price below SMA200" if alert else "Price below SMA200")
+            alert = (alert + " | " if alert else "") + "Price below SMA200"
 
         rows.append(
             {
@@ -55,6 +55,7 @@ def scan_ma_crossovers(tickers: List[str], period: str = "1y") -> List[Dict[str,
                 "ema50": info.get("ema50"),
                 "sma200": info.get("sma200"),
                 "cross_status": cross,
+                "crossover_date": cdate,
                 "price_vs_sma200": vs,
                 "alert": alert,
             }
