@@ -1,6 +1,5 @@
 """
-Watchlist / portfolio alerts using yfinance.
-Rules: price, day %, RSI, RSI divergence (regular + hidden).
+Watchlist alerts: price, day %, RSI, divergence, EMA50/SMA200 crossover.
 """
 
 from __future__ import annotations
@@ -10,13 +9,7 @@ from typing import Any, Dict, List, Optional
 import yfinance as yf
 
 from utils.divergence import compute_rsi_series, detect_rsi_divergence
-
-
-def _rsi_last(closes, period: int = 14) -> Optional[float]:
-    s = compute_rsi_series(closes, period)
-    if s is None or s.empty or pd_isna(s.iloc[-1]):
-        return None
-    return round(float(s.iloc[-1]), 2)
+from utils.charts import fetch_chart_frame
 
 
 def pd_isna(x) -> bool:
@@ -34,7 +27,7 @@ def fetch_snapshot(ticker: str, include_divergence: bool = True) -> Dict[str, An
     ns = f"{t}.NS"
     try:
         stock = yf.Ticker(ns)
-        hist = stock.history(period="6mo")
+        hist = stock.history(period="1y")
         if hist.empty:
             return {"ticker": t, "error": "No data"}
         last = hist.iloc[-1]
@@ -50,12 +43,18 @@ def fetch_snapshot(ticker: str, include_divergence: bool = True) -> Dict[str, An
         if include_divergence:
             div = detect_rsi_divergence(close, rsi_series, order=5)
 
+        chart = fetch_chart_frame(t, period="1y")
+
         return {
             "ticker": t,
             "price": round(price, 2),
             "day_change_pct": round(day_pct, 2),
             "rsi_14": rsi,
             "rsi_divergence": div,
+            "ema50": chart.get("ema50"),
+            "sma200": chart.get("sma200"),
+            "cross_status": chart.get("cross_status"),
+            "price_vs_sma200": chart.get("price_vs_sma200"),
             "error": None,
         }
     except Exception as e:
@@ -72,6 +71,7 @@ def evaluate_alerts(
     rsi_oversold: float = 30.0,
     check_rsi: bool = True,
     check_divergence: bool = True,
+    check_ma_cross: bool = True,
 ) -> List[Dict[str, Any]]:
     results = []
     for ticker in tickers:
@@ -105,6 +105,17 @@ def evaluate_alerts(
         if check_divergence and snap.get("rsi_divergence"):
             for sig in snap["rsi_divergence"].get("signals") or []:
                 fired.append(sig)
+
+        if check_ma_cross:
+            cs = snap.get("cross_status")
+            if cs == "bullish_cross":
+                fired.append("EMA50 crossed ABOVE SMA200 (bullish)")
+            elif cs == "bearish_cross":
+                fired.append("EMA50 crossed BELOW SMA200 (bearish)")
+            if snap.get("price_vs_sma200") == "above":
+                fired.append("Price above SMA200")
+            elif snap.get("price_vs_sma200") == "below":
+                fired.append("Price below SMA200")
 
         results.append({**snap, "alerts": fired})
     return results
