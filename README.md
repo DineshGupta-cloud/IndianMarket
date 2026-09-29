@@ -1,6 +1,8 @@
-# IndianMarket 🇮🇳
+# IndianMarket
 
-Multi-agent NSE/BSE research — **one dashboard** with charts, EMA50/SMA200 crossover dates, portfolios, alerts, and BUY/SELL/HOLD.
+**Equity research terminal for NSE/BSE** — multi-agent analysis, charts, MA crossovers with dates, portfolios, and alerts.
+
+Premium single-page dashboard designed like a modern fintech product.
 
 ## Run
 
@@ -14,22 +16,17 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Single dashboard (`app.py`)
+Open **http://localhost:8501**
 
-| Section | What it does |
-|--------|----------------|
-| **Chart** | Close + EMA50 + SMA200 for searched ticker |
-| **Last cross date** | When EMA50 last crossed SMA200 |
-| **MA scan board** | All symbols in universe + crossover date column |
-| **Research** | Multi-agent report + technical BUY/SELL/HOLD |
-| **Quick alerts** | Price, RSI, MA cross alerts |
+## Dashboard
+
+| Area | Features |
+|------|----------|
+| **Overview** | Price chart, EMA50, SMA200, crossover date |
+| **Screening** | Universe MA board with dates |
+| **Intelligence** | Multi-agent research + BUY/SELL/HOLD |
+| **Monitoring** | Price / RSI / MA alerts |
 | **Portfolios** | SQLite saved lists |
-
-### Sidebar
-- Search ticker
-- Period
-- MA scan universe: Suggested stocks / Portfolio / Custom
-- Optional LLM key (or `.env` `GROQ_API_KEY`)
 
 ## Optional `.env`
 
@@ -37,14 +34,6 @@ streamlit run app.py
 GROQ_API_KEY=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
-```
-
-Copy from `.env.example`. Never commit real secrets.
-
-## CLI (optional)
-
-```bash
-python main.py RELIANCE --pdf
 ```
 
 ## Disclaimer
