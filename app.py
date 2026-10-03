@@ -487,9 +487,7 @@ with st.sidebar:
     )
 
     st.markdown('<div class="im-side-section">Instrument</div>', unsafe_allow_html=True)
-    ticker = st.text_input("Symbol", value="RELIANCE", label_visibility="collapsed", placeholder="e.g. RELIANCE").upper().strip()
-    if ticker.endswith(".NS") or ticker.endswith(".BO"):
-        ticker = ticker[:-3]
+    st.caption("Select the stock from the main research field.")
 
     period = st.selectbox("Lookback", ["6mo", "1y", "2y", "5y"], index=2)
     export_pdf = st.toggle("Export PDF with research", value=False)
@@ -560,6 +558,32 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# Stock input — primary frontend control
+st.markdown(
+    """
+    <div class="im-section" style="margin-top:0.25rem;">
+      <div class="im-section-label">Stock research</div>
+      <p class="im-section-title">Enter a stock symbol</p>
+      <p class="im-section-desc">Type an NSE/BSE symbol such as RELIANCE, TCS, INFY or HDFCBANK.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+ticker_col, period_col = st.columns([3, 1])
+with ticker_col:
+    ticker = st.text_input(
+        "Stock symbol",
+        value="RELIANCE",
+        placeholder="Enter stock symbol, e.g. RELIANCE",
+        key="main_ticker",
+    ).upper().strip()
+with period_col:
+    period = st.selectbox("Lookback", ["6mo", "1y", "2y", "5y"], index=2, key="main_period")
+
+if ticker.endswith(".NS") or ticker.endswith(".BO"):
+    ticker = ticker[:-3]
 
 # Command bar
 b1, b2, b3, b4 = st.columns(4)
